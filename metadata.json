@@ -1,0 +1,8 @@
+{
+  "name": "ART - AI Reflection Test",
+  "description": "Measures a user's ability to improve AI output in a one-shot 90-second test across high-demand professional domains, evaluating the direct human value-add.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
