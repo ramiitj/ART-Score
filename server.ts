@@ -24,7 +24,12 @@ import {
   computePercentile,
   aggregateRunResults,
   ITEMS_PER_RUN,
-  assessCeilingStability
+  assessCeilingStability,
+  computeEditDistance,
+  decomposeVariance,
+  computeScoreShiftReport,
+  computeElevationMonitor,
+  computeObsolescenceMonitor
 } from "./server/headroom";
 import type { GapItem, HeadroomShadowResult, RunItemResult } from "./server/headroom";
 import {
@@ -1118,6 +1123,12 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
       }
     }
 
+    // Headroom migration §7: the natural edit-distance signal the future
+    // Efficiency term needs (K_EFFICIENCY still requires pilot calibration,
+    // §16.2 -- this only logs the raw signal so that calibration has
+    // historical data to work from once it happens).
+    const editDistanceResult = computeEditDistance(sessionData.baselinePrompt || "", editedPrompt);
+
     const attemptRecord = {
       sessionId,
       domain: sessionData.domain,
@@ -1144,7 +1155,9 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
       // scores from different eras equated via scripts/judge-reequate.ts
       // rather than silently compared as if on the same scale.
       judgeModel: JUDGE_MODEL,
-      executorModel: sessionData.executorModel || EXECUTOR_MODEL
+      executorModel: sessionData.executorModel || EXECUTOR_MODEL,
+      editDistance: editDistanceResult.editDistance,
+      editDistanceNorm: editDistanceResult.editDistanceNorm
     };
 
     if (db !== null) {
@@ -1490,6 +1503,76 @@ app.get("/api/admin/audit-log", requireAdminAuth, async (req, res) => {
     }
   }
   res.json(localAdminAuditLog.slice(0, 200));
+});
+
+// Admin Endpoint: standing validity reports (docs/HEADROOM_MIGRATION_SPEC.md
+// §13, §15) computed live against real attempts, rather than requiring a
+// manual /api/admin/attempts export + CLI round trip
+// (scripts/variance-decomposition.ts, scripts/regression-harness.ts,
+// scripts/validity-monitors.ts). Judge/executor re-equating (§16.5) is
+// intentionally not included here -- it needs a deliberately curated
+// anchor-item export, not just the attempts stream.
+app.get("/api/admin/validity-report", requireAdminAuth, async (req, res) => {
+  await recordAdminAudit("validity-report:read", req);
+
+  let attempts: any[] = [];
+  const db = getFirestoreDb();
+  if (db !== null) {
+    try {
+      const snapshot = await db.collection("attempts").get();
+      snapshot.forEach((doc: any) => attempts.push({ id: doc.id, ...doc.data() }));
+    } catch (e: any) {
+      console.error("❌ Validity report attempts retrieval error, fallback to memory:", e);
+      attempts = localAttempts;
+    }
+  } else {
+    attempts = localAttempts;
+  }
+
+  const comparableAttempts = attempts.filter(a => a?.comparable === true);
+
+  const varianceRecords = comparableAttempts
+    .map(a => {
+      const personKey: string | undefined = a.userEmail || a.anonymizedUserId;
+      const itemKey: string | undefined = a.sessionId || a.id;
+      const value = a?.evaluation?.score ?? a?.score;
+      if (!personKey || !itemKey || typeof value !== "number" || Number.isNaN(value)) return null;
+      return { personKey, itemKey, value };
+    })
+    .filter((r): r is { personKey: string; itemKey: string; value: number } => r !== null);
+
+  const scoreShiftRecords = comparableAttempts
+    .map(a => {
+      const oldScore = a?.evaluation?.score ?? a?.score;
+      const shadow = a?.headroomShadow;
+      if (typeof oldScore !== "number" || !shadow || typeof shadow.headroomScoreShadow !== "number") return null;
+      return { oldScore, newScoreShadow: shadow.headroomScoreShadow, validityGatePassed: shadow.validityGatePassed === true };
+    })
+    .filter((r): r is { oldScore: number; newScoreShadow: number; validityGatePassed: boolean } => r !== null);
+
+  const pSteeredValues = comparableAttempts
+    .map(a => a?.headroomShadow?.pSteered)
+    .filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+
+  const modelEraRecords = comparableAttempts
+    .map(a => {
+      const headroomScoreShadow = a?.headroomShadow?.headroomScoreShadow;
+      const model = a?.executorModel;
+      const timestamp = a?.timestamp;
+      if (typeof headroomScoreShadow !== "number" || typeof model !== "string" || typeof timestamp !== "string") return null;
+      return { model, headroomScoreShadow, timestamp };
+    })
+    .filter((r): r is { model: string; headroomScoreShadow: number; timestamp: string } => r !== null);
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    attemptsAnalyzed: attempts.length,
+    comparableAttemptsAnalyzed: comparableAttempts.length,
+    varianceDecomposition: decomposeVariance(varianceRecords),
+    scoreShift: computeScoreShiftReport(scoreShiftRecords),
+    elevationMonitor: computeElevationMonitor(pSteeredValues),
+    obsolescenceMonitor: computeObsolescenceMonitor(modelEraRecords)
+  });
 });
 
 // 5. Leaderboard Endpoint (PII Scrubbed public route - FIX 1.3 & FIX 6.6)

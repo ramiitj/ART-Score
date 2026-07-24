@@ -29,6 +29,7 @@ export {
   MIN_SAMPLE_SIZE_FOR_ELEVATION_MONITOR,
   MIN_SAMPLE_SIZE_PER_ERA
 } from "./validityMonitors";
+export { computeEditDistance } from "./editDistance";
 export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem } from "./types";
 export type {
   GapItem,
@@ -48,3 +49,4 @@ export type { AnchorItemPair, EquatingResult } from "./reequating";
 export type { ScoreShiftRecord, ScoreShiftReport } from "./scoreShiftReport";
 export type { CeilingStabilityResult } from "./ceilingStability";
 export type { ElevationMonitorResult, ModelEraRecord, ModelEraHeadroom, ObsolescenceMonitorResult } from "./validityMonitors";
+export type { EditDistanceResult } from "./editDistance";
