@@ -6,6 +6,7 @@ import ConfigureScreen from "./components/ConfigureScreen";
 import TourScreen from "./components/TourScreen";
 import ActiveTestScreen from "./components/ActiveTestScreen";
 import EvaluatingScreen from "./components/EvaluatingScreen";
+import EvaluationErrorScreen from "./components/EvaluationErrorScreen";
 import ResultsScreen from "./components/ResultsScreen";
 import AdminScreen from "./components/AdminScreen";
 import VerificationScreen from "./components/VerificationScreen";
@@ -43,6 +44,7 @@ export default function App() {
   const [loadingTask, setLoadingTask] = useState(false);
   const [errorPrompt, setErrorPrompt] = useState("");
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+  const [evaluationErrorMessage, setEvaluationErrorMessage] = useState("");
   const [verificationId, setVerificationId] = useState<string | null>(null);
 
   // Parse URL on load to check for admin path
@@ -129,35 +131,48 @@ export default function App() {
         }),
       });
       const evalData = await res.json();
-      
+
+      // Never fabricate a score: a non-OK response or a missing/non-numeric
+      // score means the evaluation genuinely didn't complete, so route to an
+      // honest error state instead of inventing a result (a legitimate
+      // "scoring_pending" response always includes a real numeric score, so
+      // this only trips on a genuine failure).
+      if (!res.ok || typeof evalData.score !== "number") {
+        throw new Error(evalData?.error || `Evaluation service responded with status ${res.status}.`);
+      }
+
       setEvaluation({
-        score: evalData.score ?? 50,
+        score: evalData.score,
         headroomEfficiencyScore: evalData.headroomEfficiencyScore,
         rawDeltaScore: evalData.rawDeltaScore,
         baselineQualityScore: evalData.baselineQualityScore,
-        strengths: evalData.strengths ?? ["Revised terminology structure."],
-        insight: evalData.insight ?? "Improved baseline structures.",
-        clarity: evalData.clarity ?? "Pristine alignment and clear wording.",
+        strengths: evalData.strengths ?? [],
+        insight: evalData.insight ?? "",
+        clarity: evalData.clarity ?? "",
         dimensionScores: evalData.dimensionScores,
         judgeMetadata: evalData.judgeMetadata,
         triageFlags: evalData.triageFlags,
         textTelemetry: evalData.textTelemetry,
       });
-      
+
       setStep(TestStep.RESULTS);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      // Hard fallback in case evaluation failed
-      setEvaluation({
-        score: 45,
-        baselineQualityScore: baselineQualityScore ?? 50,
-        rawDeltaScore: Math.round(45 * (100 - (baselineQualityScore ?? 50)) / 100),
-        strengths: ["Modified linguistic vocabulary.", "Completed the single-view turn constraint."],
-        insight: "Evaluation returned fallback heuristic scores due to network limitations.",
-        clarity: "Revision shows excellent structure and formatting.",
-      });
-      setStep(TestStep.RESULTS);
+      // A raw fetch()-level TypeError (e.g. "Failed to fetch") is a genuine
+      // network failure, not something with a useful message for end users;
+      // anything else here was thrown deliberately above with a real message
+      // (a server error string, or an explicit status/validity failure).
+      const message = e instanceof TypeError
+        ? "We couldn't reach the evaluation service — check your connection and retry."
+        : (e?.message || "The evaluation service could not be reached.");
+      setEvaluationErrorMessage(message);
+      setStep(TestStep.EVALUATION_ERROR);
     }
+  };
+
+  const handleRetryEvaluation = () => {
+    setEvaluationErrorMessage("");
+    handleSubmitRevision(editedPrompt, timeTaken);
   };
 
   const handleRestart = () => {
@@ -174,6 +189,7 @@ export default function App() {
     setTimeLimitSeconds(90);
     setTimeTaken(0);
     setEvaluation(null);
+    setEvaluationErrorMessage("");
     window.history.pushState({}, '', '/');
   };
 
@@ -255,6 +271,14 @@ export default function App() {
 
             {step === TestStep.EVALUATING && (
               <EvaluatingScreen />
+            )}
+
+            {step === TestStep.EVALUATION_ERROR && (
+              <EvaluationErrorScreen
+                message={evaluationErrorMessage}
+                onRetry={handleRetryEvaluation}
+                onRestart={handleRestart}
+              />
             )}
 
             {step === TestStep.RESULTS && evaluation && (

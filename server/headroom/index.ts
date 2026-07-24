@@ -16,6 +16,8 @@ export { buildGapManifestPrompt, buildManifestResolutionPrompt, aggregateManifes
 export { judgePairedComparison, judgeManifestResolution } from "./judge";
 export { generateGapManifest } from "./generator";
 export { computeHeadroomShadow } from "./headroomShadow";
+export { computePercentile, MIN_PERCENTILE_SAMPLE_SIZE } from "./percentile";
+export { decomposeVariance, MIN_REPEATED_PERSONS_FOR_RELIABLE_ESTIMATE } from "./varianceDecomposition";
 export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem } from "./types";
 export type {
   GapItem,
@@ -28,3 +30,5 @@ export type {
   ManifestResolutionResult
 } from "./types";
 export type { HeadroomShadowResult } from "./headroomShadow";
+export type { PercentileResult } from "./percentile";
+export type { VarianceDecompositionRecord, VarianceDecompositionResult, OneWayVarianceShare } from "./varianceDecomposition";

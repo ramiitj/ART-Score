@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { CheckCircle2, XCircle, ArrowRight, Activity, ShieldCheck, Mail, BookOpen, Clock, Award, Zap, TrendingUp, UserCheck } from "lucide-react";
 import { AttemptLog } from "../types";
+import ScopeBanner from "./ScopeBanner";
 
 interface VerificationScreenProps {
   attemptId: string;
@@ -64,6 +65,9 @@ export default function VerificationScreen({ attemptId }: VerificationScreenProp
 
   return (
     <div className="w-full max-w-3xl mx-auto p-6 md:p-10 bg-white rounded-3xl border border-neutral-200 shadow-sm">
+      <div className="mb-6">
+        <ScopeBanner />
+      </div>
       <div className="flex flex-col items-center mb-10 text-center">
         <div className="bg-emerald-50 w-20 h-20 rounded-full flex items-center justify-center mb-6 border border-emerald-100">
           <ShieldCheck className="w-10 h-10 text-emerald-600 animate-pulse" />

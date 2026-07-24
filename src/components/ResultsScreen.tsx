@@ -2,6 +2,13 @@ import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { Trophy, CheckCircle, RefreshCw, Layers, Zap, PenTool, Globe, TrendingUp, Twitter, Linkedin, Clock } from "lucide-react";
 import { EvaluationResult, AttemptLog } from "../types";
+import ScopeBanner from "./ScopeBanner";
+
+interface PercentileInfo {
+  percentile: number;
+  sampleSize: number;
+  sufficientData: boolean;
+}
 
 interface ResultsProps {
   sessionId: string;
@@ -46,6 +53,7 @@ export default function ResultsScreen({
   const [leaderboard, setLeaderboard] = useState<AttemptLog[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
   const [savedAttemptId, setSavedAttemptId] = useState<string | null>(null);
+  const [percentileInfo, setPercentileInfo] = useState<PercentileInfo | null>(null);
   const [feedback, setFeedback] = useState("");
   const [isFeedbackSubmitted, setIsFeedbackSubmitted] = useState(false);
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
@@ -190,6 +198,24 @@ export default function ResultsScreen({
           setLeaderboard(lbData);
           setLoadingLeaderboard(false);
         }
+
+        // Fetch percentile standing within the same domain + difficulty only
+        // (never cross-domain or cross-difficulty). Failure here is non-fatal.
+        try {
+          const pRes = await fetch(
+            `/api/percentile?domain=${encodeURIComponent(domain)}&difficulty=${encodeURIComponent(difficulty)}&score=${evaluation.score}&excludeSessionId=${encodeURIComponent(sessionId)}`
+          );
+          const pData = await pRes.json();
+          if (active && pRes.ok) {
+            setPercentileInfo({
+              percentile: pData.percentile,
+              sampleSize: pData.sampleSize,
+              sufficientData: pData.sufficientData
+            });
+          }
+        } catch (e) {
+          console.error("Failed to fetch percentile standing:", e);
+        }
       } catch (e) {
         console.error("❌ Failed to commit score attempt metrics:", e);
         if (active) setLoadingLeaderboard(false);
@@ -259,6 +285,7 @@ Verify my score and take the test: ${verifyLink}
 
   return (
     <div className="max-w-5xl mx-auto py-2 px-4 space-y-4 font-sans">
+      <ScopeBanner />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
         {/* --- LEFT COLUMN: Permanent Score & Stats --- */}
@@ -302,6 +329,18 @@ Verify my score and take the test: ${verifyLink}
             <p className="text-[10px] text-neutral-500 mt-4 font-medium px-2 leading-relaxed">
               Measures your revision efficiency over the default flat AI output under standard constraints.
             </p>
+
+            {percentileInfo && (
+              percentileInfo.sufficientData ? (
+                <p className="text-[10px] text-neutral-500 mt-2 px-2 leading-relaxed">
+                  Higher than <strong className="text-neutral-700">{percentileInfo.percentile}%</strong> of comparable {difficulty} attempts in {domain} (n={percentileInfo.sampleSize}).
+                </p>
+              ) : (
+                <p className="text-[10px] text-neutral-400 mt-2 px-2 leading-relaxed italic">
+                  Not enough comparable attempts yet in {domain} / {difficulty} to show a percentile (n={percentileInfo.sampleSize}).
+                </p>
+              )
+            )}
           </motion.div>
 
           <div className="grid grid-cols-2 gap-3">

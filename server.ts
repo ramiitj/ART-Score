@@ -19,7 +19,8 @@ import {
   generateGapManifest,
   judgePairedComparison,
   judgeManifestResolution,
-  computeHeadroomShadow
+  computeHeadroomShadow,
+  computePercentile
 } from "./server/headroom";
 import type { GapItem, HeadroomShadowResult } from "./server/headroom";
 
@@ -1366,6 +1367,47 @@ app.get("/api/leaderboard", async (req, res) => {
   }));
 
   res.json(scrubbedList);
+});
+
+// 6. Percentile Endpoint: nonparametric standing within the same domain and
+// difficulty (no cross-domain or cross-difficulty comparison — see
+// docs/HEADROOM_MIGRATION_SPEC.md §12). Honestly reports insufficient data
+// rather than showing a percentile computed from too small a reference pool.
+app.get("/api/percentile", async (req, res) => {
+  const { domain, difficulty, score, excludeSessionId } = req.query as {
+    domain?: string; difficulty?: string; score?: string; excludeSessionId?: string;
+  };
+
+  if (!domain || !difficulty || score === undefined) {
+    return res.status(400).json({ error: "Missing required params: domain, difficulty, score" });
+  }
+  const numericScore = Number(score);
+  if (Number.isNaN(numericScore)) {
+    return res.status(400).json({ error: "score must be numeric" });
+  }
+
+  const db = getFirestoreDb();
+  let list: any[] = [];
+  if (db !== null) {
+    try {
+      const query = db.collection("attempts").where("domain", "==", domain);
+      const snapshot = await query.limit(500).get();
+      snapshot.forEach((doc: any) => list.push(doc.data()));
+    } catch (e: any) {
+      console.error("❌ Failed to load percentile reference pool from Firestore:", e);
+    }
+  }
+  if (list.length === 0) {
+    list = localAttempts.filter(a => a.domain === domain);
+  }
+
+  const referenceScores = list
+    .filter(a => a.difficulty === difficulty && a.comparable === true && typeof a.score === "number")
+    .filter(a => !excludeSessionId || a.sessionId !== excludeSessionId)
+    .map(a => a.score as number);
+
+  const result = computePercentile(numericScore, referenceScores);
+  res.json({ domain, difficulty, score: numericScore, ...result });
 });
 
 // ==========================================
