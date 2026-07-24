@@ -4,8 +4,7 @@ import crypto from "crypto";
 import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
-import firebase from "firebase/compat/app";
-import "firebase/compat/firestore";
+import admin from "firebase-admin";
 import dotenv from "dotenv";
 
 import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, FALLBACK_TASKS } from "./asset-data";
@@ -77,35 +76,38 @@ const evaluateRevisionLimiter = rateLimit({
   message: { error: "Too many evaluation requests from this address. Please wait and try again." }
 });
 
-// Lazy-loaded firebase initialization
+// Lazy-loaded firebase initialization. Server-side code talks to Firestore
+// through firebase-admin (service-account credentials, bypasses client
+// security rules as server code should) rather than the client/web SDK --
+// the web SDK was never appropriate here since this runs with full trust,
+// not as an end-user client subject to Firestore security rules.
 let firestoreDb: any = null;
-
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID,
-  measurementId: process.env.FIREBASE_MEASUREMENT_ID
-};
 
 function getFirestoreDb() {
   if (firestoreDb !== null) return firestoreDb;
-  if (!process.env.FIREBASE_API_KEY || !process.env.FIREBASE_PROJECT_ID) {
-    console.warn("⚠️ Firebase environment variables missing. Operating in local in-memory mode.");
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    console.warn("⚠️ Firebase Admin credentials missing. Operating in local in-memory mode.");
     return null;
   }
 
   try {
-    if (firebase.apps.length === 0) {
-      firebase.initializeApp(firebaseConfig);
+    if (admin.apps.length === 0) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          // Service-account private keys stored in env vars / most secret
+          // managers have their real newlines escaped as literal "\n" --
+          // restore them or certificate parsing fails.
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+        })
+      });
     }
-    firestoreDb = firebase.firestore();
-    console.log("🚀 Firebase Web SDK/Firestore successfully initialized on server!");
+    firestoreDb = admin.firestore();
+    console.log("🚀 Firebase Admin SDK/Firestore successfully initialized on server!");
     return firestoreDb;
   } catch (error) {
-    console.error("❌ Failed to initialize Firebase:", error);
+    console.error("❌ Failed to initialize Firebase Admin:", error);
     return null;
   }
 }
