@@ -3,10 +3,10 @@ import { ShieldAlert, RefreshCw, RotateCcw } from "lucide-react";
 interface EvaluationErrorScreenProps {
   message: string;
   onRetry: () => void;
-  onRestart: () => void;
+  onRetakeChallenge: () => void;
 }
 
-export default function EvaluationErrorScreen({ message, onRetry, onRestart }: EvaluationErrorScreenProps) {
+export default function EvaluationErrorScreen({ message, onRetry, onRetakeChallenge }: EvaluationErrorScreenProps) {
   return (
     <div className="max-w-md mx-auto text-center py-16 px-4">
       <div className="w-16 h-16 bg-rose-50 rounded-full border border-rose-100 flex items-center justify-center mx-auto mb-6 text-rose-500">
@@ -28,7 +28,7 @@ export default function EvaluationErrorScreen({ message, onRetry, onRestart }: E
           Retry Evaluation
         </button>
         <button
-          onClick={onRestart}
+          onClick={onRetakeChallenge}
           className="inline-flex items-center justify-center gap-1.5 bg-white hover:bg-neutral-50 border border-neutral-200 text-neutral-600 text-xs font-bold py-2.5 px-6 rounded-md transition-all cursor-pointer"
         >
           <RotateCcw className="w-4 h-4" />

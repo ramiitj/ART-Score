@@ -20,7 +20,7 @@ interface ResultsProps {
   baseline: string;
   editedPrompt: string;
   evaluation: EvaluationResult;
-  onRestart: () => void;
+  onRetakeChallenge: () => void;
   age: string;
   gender: string;
   education: string;
@@ -40,7 +40,7 @@ export default function ResultsScreen({
   baseline,
   editedPrompt,
   evaluation,
-  onRestart,
+  onRetakeChallenge,
   age,
   gender,
   education,
@@ -355,7 +355,7 @@ Verify my score and take the test: ${verifyLink}
           </div>
 
           <button
-            onClick={onRestart}
+            onClick={onRetakeChallenge}
             className="group w-full flex items-center justify-center gap-2 bg-neutral-900 text-white hover:bg-black active:bg-neutral-800 transition-colors rounded-xl px-4 py-3.5 text-xs font-bold shadow-sm cursor-pointer"
           >
             <RefreshCw className="w-4 h-4 text-amber-500 group-hover:rotate-180 transition-transform duration-500" />

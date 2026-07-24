@@ -193,6 +193,26 @@ export default function App() {
     window.history.pushState({}, '', '/');
   };
 
+  // Retake flow: resets task-specific state but preserves identity and
+  // demographics, since a repeat attempt by the same person is exactly the
+  // data the person x item variance decomposition needs real data for (see
+  // docs/HEADROOM_MIGRATION_SPEC.md §11 and §15). Used from Results
+  // ("Benchmark New Scenario") and the evaluation error screen ("Start New
+  // Session") -- neither is a reason to make someone re-enter who they are.
+  const handleRetakeChallenge = () => {
+    setStep(TestStep.CONFIGURE);
+    setSessionId("");
+    setTask("");
+    setBaseline("");
+    setBaselinePrompt("");
+    setEditedPrompt("");
+    setTimeLimitSeconds(90);
+    setTimeTaken(0);
+    setEvaluation(null);
+    setEvaluationErrorMessage("");
+    window.history.pushState({}, '', '/');
+  };
+
   return (
     <div className={`min-h-screen bg-neutral-50/20 text-neutral-800 flex flex-col justify-between font-sans selection:bg-amber-100 ${[TestStep.ACTIVE_TEST, TestStep.CONFIGURE, TestStep.TOUR].includes(step) ? "lg:h-screen lg:overflow-hidden" : ""}`}>
       
@@ -243,6 +263,13 @@ export default function App() {
                 onBack={handleRestart}
                 onGenerate={handleGenerateTask}
                 isLoading={loadingTask}
+                initialUserName={userName}
+                initialUserEmail={userEmail}
+                initialAge={age}
+                initialGender={gender}
+                initialEducation={education}
+                initialWorkExperience={workExperience}
+                initialResearchConsent={researchConsent}
               />
             )}
 
@@ -277,7 +304,7 @@ export default function App() {
               <EvaluationErrorScreen
                 message={evaluationErrorMessage}
                 onRetry={handleRetryEvaluation}
-                onRestart={handleRestart}
+                onRetakeChallenge={handleRetakeChallenge}
               />
             )}
 
@@ -292,7 +319,7 @@ export default function App() {
                 baseline={baseline}
                 editedPrompt={editedPrompt}
                 evaluation={evaluation}
-                onRestart={handleRestart}
+                onRetakeChallenge={handleRetakeChallenge}
                 age={age}
                 gender={gender}
                 education={education}

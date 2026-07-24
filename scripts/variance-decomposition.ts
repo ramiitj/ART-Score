@@ -12,14 +12,19 @@ import { readFileSync } from "fs";
 import { decomposeVariance } from "../server/headroom/varianceDecomposition";
 import type { VarianceDecompositionRecord } from "../server/headroom/varianceDecomposition";
 
-function loadAttempts(filePath: string): any[] {
+export function loadAttempts(filePath: string): any[] {
   const raw = JSON.parse(readFileSync(filePath, "utf-8"));
   if (Array.isArray(raw)) return raw;
   if (raw && Array.isArray(raw.attempts)) return raw.attempts;
   throw new Error("Expected a JSON array of attempts, or { attempts: [...] }.");
 }
 
-function toRecords(attempts: any[]): VarianceDecompositionRecord[] {
+// Item identity is each attempt's own sessionId, not domain::difficulty.
+// Every /api/generate-task call produces a genuinely distinct generated
+// task/baseline/prompt, so two attempts sharing a domain and difficulty are
+// NOT the same item -- keying on domain::difficulty collapsed exactly the
+// task-to-task variation this decomposition needs to see.
+export function toRecords(attempts: any[]): VarianceDecompositionRecord[] {
   const records: VarianceDecompositionRecord[] = [];
   for (const a of attempts) {
     if (a?.comparable !== true) continue;
@@ -27,7 +32,7 @@ function toRecords(attempts: any[]): VarianceDecompositionRecord[] {
     if (typeof score !== "number" || Number.isNaN(score)) continue;
 
     const personKey: string | undefined = a.userEmail || a.anonymizedUserId;
-    const itemKey: string | undefined = a.domain && a.difficulty ? `${a.domain}::${a.difficulty}` : undefined;
+    const itemKey: string | undefined = a.sessionId || a.id;
     if (!personKey || !itemKey) continue;
 
     records.push({ personKey, itemKey, value: score });
@@ -49,7 +54,7 @@ function main() {
   console.log("=== Person x Item Variance Decomposition ===");
   console.log(`Comparable attempts analyzed: ${result.totalN} (of ${attempts.length} in export)`);
   console.log(`Unique persons: ${result.uniquePersons}`);
-  console.log(`Unique items (domain x difficulty): ${result.uniqueItems}`);
+  console.log(`Unique items (by generated session): ${result.uniqueItems}`);
   console.log(`Persons with 2+ attempts: ${result.personsWithRepeatedAttempts}`);
   console.log("");
   console.log(`Person variance share: ${(result.personVariance.varianceShare * 100).toFixed(1)}%`);
@@ -62,9 +67,9 @@ function main() {
       `(${result.personsWithRepeatedAttempts}, want >= 20) for the person-variance ` +
       "share above to be trustworthy. With mostly one attempt per person, 'person " +
       "variance' is confounded with single-item noise and cannot be distinguished " +
-      "from it. This is exactly the limitation multi-item sessions (migration " +
-      "Phase 4b) are meant to fix -- treat the shares above as illustrative only " +
-      "until then."
+      "from it. Encourage repeat attempts by the same person (same email, new " +
+      "domain/difficulty) to build up this sample -- treat the shares above as " +
+      "illustrative only until then."
     );
   } else {
     console.log(
@@ -76,4 +81,9 @@ function main() {
   }
 }
 
-main();
+// Only run when executed directly (npx tsx scripts/variance-decomposition.ts),
+// not when toRecords/loadAttempts are imported for unit testing.
+const isMainModule = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (isMainModule) {
+  main();
+}

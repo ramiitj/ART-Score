@@ -17,22 +17,46 @@ interface ConfigureProps {
     researchConsent: boolean;
   }) => void;
   isLoading: boolean;
+  // Pre-fills identity/demographics on a repeat attempt by the same person
+  // (e.g. "Benchmark New Scenario" from Results) so retaking the test doesn't
+  // force re-entering everything from scratch. This also makes repeat
+  // attempts by the same person low-friction, which is what the person x
+  // item variance decomposition (scripts/variance-decomposition.ts) needs
+  // real data for -- see docs/HEADROOM_MIGRATION_SPEC.md §11 and §15.
+  initialUserName?: string;
+  initialUserEmail?: string;
+  initialAge?: string;
+  initialGender?: string;
+  initialEducation?: string;
+  initialWorkExperience?: string;
+  initialResearchConsent?: boolean;
 }
 
-export default function ConfigureScreen({ onBack, onGenerate, isLoading }: ConfigureProps) {
+export default function ConfigureScreen({
+  onBack,
+  onGenerate,
+  isLoading,
+  initialUserName = "",
+  initialUserEmail = "",
+  initialAge = "",
+  initialGender = "",
+  initialEducation = "",
+  initialWorkExperience = "",
+  initialResearchConsent = false,
+}: ConfigureProps) {
   // Defaults set to Beginner and General
-  const [userName, setUserName] = useState("");
-  const [userEmail, setUserEmail] = useState("");
+  const [userName, setUserName] = useState(initialUserName);
+  const [userEmail, setUserEmail] = useState(initialUserEmail);
   const [domain, setDomain] = useState("General Knowledge Work");
   const [difficulty, setDifficulty] = useState("Beginner");
-  
+
   // Demographic states relocated from ResultsScreen
-  const [age, setAge] = useState("");
-  const [gender, setGender] = useState("");
-  const [education, setEducation] = useState("");
-  const [workExperience, setWorkExperience] = useState("");
-  const [researchConsent, setResearchConsent] = useState(false);
-  
+  const [age, setAge] = useState(initialAge);
+  const [gender, setGender] = useState(initialGender);
+  const [education, setEducation] = useState(initialEducation);
+  const [workExperience, setWorkExperience] = useState(initialWorkExperience);
+  const [researchConsent, setResearchConsent] = useState(initialResearchConsent);
+
   const [error, setError] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
