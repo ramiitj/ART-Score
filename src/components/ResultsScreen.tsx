@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { Trophy, CheckCircle, RefreshCw, Layers, Zap, PenTool, Globe, TrendingUp, Twitter, Linkedin, Clock } from "lucide-react";
-import { EvaluationResult, AttemptLog } from "../types";
+import { EvaluationResult, AttemptLog, RunItemSummary } from "../types";
 import ScopeBanner from "./ScopeBanner";
 
 interface PercentileInfo {
@@ -20,6 +20,7 @@ interface ResultsProps {
   baseline: string;
   editedPrompt: string;
   evaluation: EvaluationResult;
+  runItems?: RunItemSummary[];
   onRetakeChallenge: () => void;
   age: string;
   gender: string;
@@ -40,6 +41,7 @@ export default function ResultsScreen({
   baseline,
   editedPrompt,
   evaluation,
+  runItems = [],
   onRetakeChallenge,
   age,
   gender,
@@ -286,6 +288,31 @@ Verify my score and take the test: ${verifyLink}
   return (
     <div className="max-w-5xl mx-auto py-2 px-4 space-y-4 font-sans">
       <ScopeBanner />
+
+      {runItems.length > 1 && (
+        <div className="p-4 rounded-2xl border border-neutral-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[10px] font-mono font-bold tracking-widest text-neutral-500 uppercase">
+              Session Summary ({runItems.length} Items)
+            </span>
+            <span className="text-xs font-bold text-neutral-700">
+              Average: {(runItems.reduce((sum, it) => sum + it.score, 0) / runItems.length).toFixed(1)}%
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {runItems.map((item, idx) => (
+              <div
+                key={item.sessionId}
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-neutral-50 border border-neutral-100 text-xs"
+              >
+                <span className="font-semibold text-neutral-600">Item {idx + 1} · {item.difficulty}</span>
+                <span className="font-bold text-neutral-900">{item.score > 0 ? `+${item.score}%` : `${item.score}%`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
         {/* --- LEFT COLUMN: Permanent Score & Stats --- */}

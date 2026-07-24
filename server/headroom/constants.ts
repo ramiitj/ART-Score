@@ -30,3 +30,9 @@ export const JUDGE_PASS_COUNT = 3;
 // passes for Headroom to be non-zero. Below this, there is no reliable
 // elevation beyond the model's own self-revision to measure.
 export const VALIDITY_GATE_THRESHOLD = 2 / 3;
+
+// Items generated per test run (docs/HEADROOM_MIGRATION_SPEC.md §11, §16.3).
+// A single item cannot separate a person's capacity from item difficulty --
+// serving multiple items per person is what makes the person x item variance
+// decomposition (scripts/variance-decomposition.ts) possible.
+export const ITEMS_PER_RUN = 3;

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { TestStep, EvaluationResult } from "./types";
+import { TestStep, EvaluationResult, RunItemSummary } from "./types";
 import WelcomeScreen from "./components/WelcomeScreen";
 import ConfigureScreen from "./components/ConfigureScreen";
 import TourScreen from "./components/TourScreen";
@@ -28,7 +28,16 @@ export default function App() {
   const [headroom, setHeadroom] = useState(50);
   const [failureModeTags, setFailureModeTags] = useState("");
   const [editedPrompt, setEditedPrompt] = useState("");
-  
+
+  // Multi-item run state (docs/HEADROOM_MIGRATION_SPEC.md §11): a session is
+  // now a run of several items served under one runId, so a person's
+  // capacity can be separated from any single item's difficulty.
+  const [runId, setRunId] = useState("");
+  const [itemIndex, setItemIndex] = useState(0);
+  const [itemsTotal, setItemsTotal] = useState(1);
+  const [runItems, setRunItems] = useState<RunItemSummary[]>([]);
+  const [pendingRetry, setPendingRetry] = useState<"evaluate" | "advance">("evaluate");
+
   // Dynamic timer details
   const [timeLimitSeconds, setTimeLimitSeconds] = useState(90);
   const [timeTaken, setTimeTaken] = useState(0);
@@ -104,7 +113,11 @@ export default function App() {
       setHeadroom(0);
       setFailureModeTags("");
       setTimeLimitSeconds(data.timeLimitSeconds || 90);
-      
+      setRunId(data.runId || "");
+      setItemIndex(data.itemIndex ?? 0);
+      setItemsTotal(data.itemsTotal || 1);
+      setRunItems([]);
+
       // Advance stage to Guided Tour screen
       setStep(TestStep.TOUR);
     } catch (e: any) {
@@ -115,10 +128,51 @@ export default function App() {
     }
   };
 
+  // Fetches the next item under the same run, or -- once itemsTotal items
+  // are done -- shows the final Results screen. Split out from
+  // handleSubmitRevision so a failure here can be retried on its own,
+  // without re-submitting the edit that already scored successfully.
+  const advanceToNextItem = async () => {
+    const nextIndex = itemIndex + 1;
+    if (nextIndex >= itemsTotal) {
+      setStep(TestStep.RESULTS);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/generate-task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain, difficulty, runId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.sessionId) {
+        throw new Error(data?.error || `Task generator responded with status ${res.status}.`);
+      }
+
+      setSessionId(data.sessionId);
+      setTask(data.task || "");
+      setBaseline(data.baseline || "");
+      setBaselinePrompt(data.baselinePrompt || "");
+      setEditedPrompt("");
+      setTimeTaken(0);
+      setTimeLimitSeconds(data.timeLimitSeconds || 90);
+      setItemIndex(data.itemIndex ?? nextIndex);
+      // Subsequent items skip the guided tour -- the person has already seen it.
+      setStep(TestStep.ACTIVE_TEST);
+    } catch (e: any) {
+      console.error(e);
+      setPendingRetry("advance");
+      setEvaluationErrorMessage(e?.message || "Failed to generate the next item in this session.");
+      setStep(TestStep.EVALUATION_ERROR);
+    }
+  };
+
   // 2. Submission of the user's edited prompt -> Start rating processing
   const handleSubmitRevision = async (submittedEditedPrompt: string, elapsedSeconds: number) => {
     setEditedPrompt(submittedEditedPrompt);
     setTimeTaken(elapsedSeconds);
+    setPendingRetry("evaluate");
     setStep(TestStep.EVALUATING);
 
     try {
@@ -155,7 +209,35 @@ export default function App() {
         textTelemetry: evalData.textTelemetry,
       });
 
-      setStep(TestStep.RESULTS);
+      setRunItems(prev => [...prev, { sessionId, domain, difficulty, score: evalData.score }]);
+
+      // The final item's own ResultsScreen mount effect does the full
+      // save-attempt (with telemetry/geo/leaderboard/percentile). Earlier
+      // items in the run need their own headless save now -- each is a
+      // distinct sessionId/attempt record, and every item needs the
+      // person's identity attached for the person x item variance
+      // decomposition (scripts/variance-decomposition.ts) to work.
+      const isLastItem = itemIndex + 1 >= itemsTotal;
+      if (!isLastItem) {
+        fetch("/api/save-attempt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            userName,
+            userEmail,
+            age,
+            gender,
+            education,
+            workExperience,
+            researchConsent,
+            timeTaken: elapsedSeconds,
+            userSignals: { timeTaken: elapsedSeconds, editCount: 0, retried: false },
+          }),
+        }).catch(err => console.error("Failed to save intermediate item attempt:", err));
+      }
+
+      await advanceToNextItem();
     } catch (e: any) {
       console.error(e);
       // A raw fetch()-level TypeError (e.g. "Failed to fetch") is a genuine
@@ -172,7 +254,12 @@ export default function App() {
 
   const handleRetryEvaluation = () => {
     setEvaluationErrorMessage("");
-    handleSubmitRevision(editedPrompt, timeTaken);
+    if (pendingRetry === "advance") {
+      setStep(TestStep.EVALUATING);
+      advanceToNextItem();
+    } else {
+      handleSubmitRevision(editedPrompt, timeTaken);
+    }
   };
 
   const handleRestart = () => {
@@ -190,6 +277,11 @@ export default function App() {
     setTimeTaken(0);
     setEvaluation(null);
     setEvaluationErrorMessage("");
+    setRunId("");
+    setItemIndex(0);
+    setItemsTotal(1);
+    setRunItems([]);
+    setPendingRetry("evaluate");
     window.history.pushState({}, '', '/');
   };
 
@@ -210,6 +302,11 @@ export default function App() {
     setTimeTaken(0);
     setEvaluation(null);
     setEvaluationErrorMessage("");
+    setRunId("");
+    setItemIndex(0);
+    setItemsTotal(1);
+    setRunItems([]);
+    setPendingRetry("evaluate");
     window.history.pushState({}, '', '/');
   };
 
@@ -319,6 +416,7 @@ export default function App() {
                 baseline={baseline}
                 editedPrompt={editedPrompt}
                 evaluation={evaluation}
+                runItems={runItems}
                 onRetakeChallenge={handleRetakeChallenge}
                 age={age}
                 gender={gender}

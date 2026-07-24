@@ -5,7 +5,8 @@ export {
   JUDGE_MODEL,
   JUDGE_TEMPERATURE,
   JUDGE_PASS_COUNT,
-  VALIDITY_GATE_THRESHOLD
+  VALIDITY_GATE_THRESHOLD,
+  ITEMS_PER_RUN
 } from "./constants";
 export { maskName } from "./maskName";
 export { medianOfThree, aggregatePasses } from "./aggregation";
@@ -18,6 +19,8 @@ export { generateGapManifest } from "./generator";
 export { computeHeadroomShadow } from "./headroomShadow";
 export { computePercentile, MIN_PERCENTILE_SAMPLE_SIZE } from "./percentile";
 export { decomposeVariance, MIN_REPEATED_PERSONS_FOR_RELIABLE_ESTIMATE } from "./varianceDecomposition";
+export { aggregateRunResults } from "./aggregateRun";
+export { computeEquatingOffset, applyEquatingOffset, MIN_ANCHOR_ITEMS_FOR_RELIABLE_EQUATING } from "./reequating";
 export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem } from "./types";
 export type {
   GapItem,
@@ -32,3 +35,5 @@ export type {
 export type { HeadroomShadowResult } from "./headroomShadow";
 export type { PercentileResult } from "./percentile";
 export type { VarianceDecompositionRecord, VarianceDecompositionResult, OneWayVarianceShare } from "./varianceDecomposition";
+export type { RunItemResult, RunAggregate } from "./aggregateRun";
+export type { AnchorItemPair, EquatingResult } from "./reequating";

@@ -402,10 +402,14 @@ From the paper's Table 2. Each must be satisfied by **architecture**, not by a p
 
 ## 11. Multi-item sessions + person-vs-task validation
 
+**Status: implemented (Phase 4b).** Items per session decided at 3 (§16.3).
+
 The single-item design cannot separate a person's capacity from item difficulty. The paper makes this the **first validation and a falsification condition** (p.15): *"A measure separating tasks but not persons would reveal an instrument capturing item difficulty rather than a human capacity."*
 
-- Serve **3–5 calibrated items per session**; aggregate Headroom across items (mean of item Headrooms, with SE).
-- Instrument a **variance decomposition**: log enough to fit `Headroom ~ person + task + person:task`. Ship a `scripts/variance_decomposition.*` job that reports the person-variance component. **Gate the "valid instrument" claim on person variance being materially > 0.**
+- Serve **3 items per session** (`ITEMS_PER_RUN`, `server/headroom/constants.ts`): `/api/generate-task` accepts an optional `runId`, groups items under a `testRuns/{runId}` record, and `GET /api/run/:runId` reports per-item status plus the cross-item mean ± SE (`aggregateRunResults()`, `server/headroom/aggregateRun.ts`). The client (`src/App.tsx`) loops the person through all 3 items in one sitting, skipping the tour screen after the first, and shows a session summary alongside the final item's full results.
+- Items are **not yet drawn from a calibrated item bank** (§6) — each is still live-generated per the existing single-item pipeline, just grouped under a shared run. The item bank remains a separate, not-yet-built piece.
+- Every non-final item now gets its own headless `save-attempt` call so its person identity (`userEmail`) is attached immediately, rather than only the last item in a run getting a real person key — this is what makes the run's 3 items usable as genuine repeated measures.
+- Variance decomposition: `scripts/variance-decomposition.ts` reports the person-variance component from real attempts, keyed by `sessionId` (item) and `userEmail` (person). **The "valid instrument" claim is still gated on person variance being materially > 0** — multi-item sessions now produce the repeated-measures data this needs, but the gate itself can only be evaluated once real usage accumulates.
 
 ---
 
@@ -413,7 +417,7 @@ The single-item design cannot separate a person's capacity from item difficulty.
 
 - Report **distributional** standing (within-domain, within-difficulty percentiles), never a single cross-domain mean — models beat the human *average* while the best humans beat models; the tail is the point (paper §"Implications", p.13). Preserve the upper tail in any leaderboard.
 - Show `HeadroomScore ± SE`, the validity-gate result, and `comparable`.
-- **Scope banner:** results are valid for symbolic/analytic work only; the instrument is silent on embodied, relational, and accountability-bearing work (paper §"Implications", p.14). Prune/scope domains accordingly (relationship-heavy cores of Sales/Customer Support fall partly outside scope).
+- **Scope banner:** results are valid for symbolic/analytic work only; the instrument is silent on embodied, relational, and accountability-bearing work (paper §"Implications", p.14). **Domain pruning resolved (§16.4):** the domain list is now scoped to 7 of the original 13 (`src/types.ts` `DOMAINS`), removing Sales, Customer Support, Human Resources, Marketing, Business Operations, and Content & Communications.
 
 ---
 
@@ -429,17 +433,21 @@ Bake the paper's falsifiability conditions in as live checks, not one-off studie
 
 ## 14. Migration phases
 
-**Phase 0 — Scaffolding (no behavior change).** Extract scoring into a pure, unit-tested `headroom/` module. Add golden-file regression tests around current outputs so later diffs are visible. Add `firebase-admin`; make DB required in prod.
+**Status legend:** ✅ done · ⚠️ partial/held · ⛔ not started.
 
-**Phase 1 — Executor pinning + self-revision (shadow).** Add `Bsr` self-revision and record `selfRevisedOutput`/`selfRevisedSpread` on every session. No scoring change yet.
+**Phase 0 — Scaffolding (no behavior change). ✅** Extracted scoring into a pure, unit-tested `headroom/` module. Golden-file regression tests around current outputs. `firebase-admin` added and actually wired up (server.ts now uses Admin SDK credentials, not the client SDK, for Firestore).
 
-**Phase 2 — Judge v2 (shadow).** Implement `judgePairedComparison()` + `judgeManifestResolution()`. For each real attempt, compute the new Headroom **alongside** the old score; log both; surface only the old score. Compare distributions.
+**Phase 1 — Executor pinning + self-revision (shadow). ✅** `Bsr` self-revision recorded (`selfRevisedOutput`/`selfRevisedSpread`) on every session. No scoring change.
 
-**Phase 3 — Generator v2 + direct edit.** Switch UI from "revision instructions" to **editing the baseline prompt**; Generator emits `gapManifest`; retire flaw injection. Still shadow the score if desired.
+**Phase 2 — Judge v2 (shadow). ✅** `judgePairedComparison()` + `judgeManifestResolution()` implemented. Every real attempt computes `headroomShadow` alongside the old score; only the old score is surfaced.
 
-**Phase 4 — Cutover.** Make Headroom the surfaced score. Delete §10 items. Ship item-bank calibration + variance decomposition. Flip reporting to distributional + SE + scope banner.
+**Phase 3 — Generator v2 + direct edit. ✅** UI edits the baseline prompt directly; Generator emits `gapManifest`; flaw injection (`FAILURE_MODES`, `flawsInjected`, `primaryFailureMode`) fully retired.
 
-**Phase 5 — Hardening.** Auth + rate limits + spend cap on generate/evaluate; admin key rotation + audit log; downgrade `INJECTION_REGEXES` to advisory paired with the model-side integrity signal.
+**Phase 4 — Cutover. ⚠️ Partial, deliberately held.** Percentile/distributional reporting, scope banner, and variance decomposition (`scripts/variance-decomposition.ts`) shipped. The actual score cutover has **not** happened: `K_EFFICIENCY` (§16.2) still needs pilot calibration against real usage data that doesn't exist yet, so `headroomShadow` stays shadow-only and the legacy composite is still what's surfaced. §10's deletions (C2–C5 guardrails, `headroomEfficiencyScore`/`rawDelta` composite) are blocked on this same cutover — deleting them now would break live scoring.
+
+**Phase 4b — Multi-item sessions + person-vs-task validation (§11). ✅** `ITEMS_PER_RUN = 3`; `testRuns` collection; `GET /api/run/:runId`; App.tsx runs a real 3-item loop per session (headless `save-attempt` for non-final items so every item's attempt carries the person's identity). `scripts/variance-decomposition.ts`'s `sessionId`-keyed item identity (fixed pre-existing bug) now receives genuine repeated-measures data from real multi-item runs.
+
+**Phase 5 — Hardening. ✅** Admin key auth (constant-time comparison) + rate limits + daily spend cap; admin audit log; `INJECTION_REGEXES` downgraded to advisory alongside the model-side `integrityViolation` signal; CI (typecheck/test/build) added. Judge/executor re-equating mechanism added (§16.5) — the policy and code path exist, but no real model transition has occurred yet to equate across.
 
 ---
 
@@ -452,10 +460,10 @@ Bake the paper's falsifiability conditions in as live checks, not one-off studie
 
 ---
 
-## 16. Open decisions (need product/research sign-off)
+## 16. Open decisions
 
-1. **Frontier anchor:** manifest-complete as frontier (recommended) vs a scaffolded strong-model exemplar. Spec assumes manifest-complete.
-2. **`K_EFFICIENCY`** and edit-distance normalization: pin after pilot calibration.
-3. **Items per session** (3 vs 5): reliability vs completion-time tradeoff.
-4. **Domain pruning:** which of the 13 domains stay in scope under the symbolic/analytic boundary.
-5. **Judge model pinning + re-equating** policy across model upgrades (anchor-item design).
+1. **Frontier anchor — RESOLVED: manifest-complete.** `aggregateManifestResolution()` (`server/headroom/manifestMath.ts`) already implements this: `closable` = manifest gaps the self-revised ceiling does not already resolve, and `resolution = resolvedCount / closableCount` over exactly that closable set. No scaffolded strong-model exemplar path exists or is planned.
+2. **`K_EFFICIENCY`** and edit-distance normalization: still pending — requires pilot calibration against real usage data, which does not yet exist. This is the one remaining hard blocker on the Phase 4 cutover (§14).
+3. **Items per session — RESOLVED: 3.** Implemented via `ITEMS_PER_RUN` (`server/headroom/constants.ts`), the `testRuns` collection, `GET /api/run/:runId`, and the App.tsx run loop (§11).
+4. **Domain pruning — RESOLVED: 7 of the original 13.** Kept: General Knowledge Work, Software Engineering, Product Management, Data Analysis, Finance, Legal, Consulting & Strategy. Pruned: Marketing, Sales, Human Resources, Business Operations, Content & Communications, Customer Support — either explicitly flagged by the paper as relationship-heavy (Sales, Customer Support) or leaning interpersonal/persuasive/generic rather than analytic-correctness-bearing (Human Resources, Marketing, Business Operations, Content & Communications). See `src/types.ts` `DOMAINS`.
+5. **Judge model pinning + re-equating policy — RESOLVED (mechanism), pending real transition.** `computeFinalEvaluation()` now excludes an attempt from `comparable` whenever `sessionData.executorModel` no longer matches the currently pinned `EXECUTOR_MODEL` (`executorModelMismatch`), and every attempt records both `executorModel` and `judgeModel` at scoring time. `server/headroom/reequating.ts` + `scripts/judge-reequate.ts` compute the anchor-item equating offset (mean new-model-score minus old-model-score across a shared item set) once such a set exists — per the paper's anchor-item design, producing that set is a deliberate offline calibration exercise (re-run a shared item bank subset through both model eras), not something that happens automatically in the attempts stream today.

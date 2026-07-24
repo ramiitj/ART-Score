@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { describe, it, expect } from "vitest";
 import { computeFinalEvaluation } from "../computeFinalEvaluation";
 import { aggregatePasses } from "../aggregation";
-import { MASTER_SYSTEM_PROMPT } from "../constants";
+import { MASTER_SYSTEM_PROMPT, EXECUTOR_MODEL } from "../constants";
 import type { JudgePassResult } from "../types";
 
 function makePass(overrides: Partial<JudgePassResult> = {}): JudgePassResult {
@@ -35,6 +35,7 @@ function baseSession(overrides: Partial<any> = {}) {
     baselineSpread: 0,
     baselineBandWide: false,
     generationModelUsed: "gemini-3.1-flash-lite",
+    executorModel: EXECUTOR_MODEL,
     timeLimit: 90,
     rubricVersionId: "v1.0.0",
     systemPrompt: MASTER_SYSTEM_PROMPT,
@@ -278,5 +279,21 @@ describe("computeFinalEvaluation — comparable flag", () => {
     const session = baseSession({ generationModelUsed: "gemini-3.5-flash" });
     const result = computeFinalEvaluation(session, scoreResult, "out", PLAIN_REVISION, 30, false);
     expect(result.comparable).toBe(false);
+  });
+
+  it("is false when the session's executor model does not match the currently pinned EXECUTOR_MODEL", () => {
+    const scoreResult = aggregatePasses(passes)!;
+    const session = baseSession({ executorModel: "some-other-model" });
+    const result = computeFinalEvaluation(session, scoreResult, "out", PLAIN_REVISION, 30, false);
+    expect(result.executorModelMismatch).toBe(true);
+    expect(result.comparable).toBe(false);
+  });
+
+  it("reports executorModelMismatch=false and stays comparable when the executor model matches", () => {
+    const scoreResult = aggregatePasses(passes)!;
+    const session = baseSession();
+    const result = computeFinalEvaluation(session, scoreResult, "out", PLAIN_REVISION, 30, false);
+    expect(result.executorModelMismatch).toBe(false);
+    expect(result.comparable).toBe(true);
   });
 });

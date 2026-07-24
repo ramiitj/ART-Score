@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { MASTER_SYSTEM_PROMPT } from "./constants";
+import { MASTER_SYSTEM_PROMPT, EXECUTOR_MODEL } from "./constants";
 import type { AggregatedScore } from "./types";
 
 // Unify evaluation post-processing math, guardrails, caps, and comparable flag (FIX 6, 11)
@@ -127,6 +127,17 @@ export function computeFinalEvaluation(
   const timeExceeded = timeTakenServerSeconds > (sessionData.timeLimit + 20);
   const judgeUnstable = (sessionData.baselineSpread > 4) || (scoreResult.spread > 4);
 
+  // Executor re-equating gate (docs/HEADROOM_MIGRATION_SPEC.md §16.5): the
+  // baseline/self-revision for this session were executed under whichever
+  // model was pinned at generation time (sessionData.executorModel). If the
+  // currently pinned EXECUTOR_MODEL has since changed -- e.g. a mid-flight
+  // session spanning a model upgrade, or a stale/replayed session -- the
+  // steered output below would be scored against a baseline/ceiling from a
+  // different model, breaking the Executor-pinning validity mechanism
+  // (spec §9: "Confounded conditions"). Exclude it rather than silently mix
+  // model eras into one comparable pool.
+  const executorModelMismatch = sessionData.executorModel !== EXECUTOR_MODEL;
+
   const comparable = !(
     sessionData.generationModelUsed === "static-fallback" ||
     sessionData.baselineBandWide === true ||
@@ -134,7 +145,8 @@ export function computeFinalEvaluation(
     regexInjectionSuspected === true ||
     rulingPass.integrityViolation === true ||
     timeExceeded === true ||
-    sessionData.generationModelUsed !== "gemini-3.1-flash-lite"
+    sessionData.generationModelUsed !== "gemini-3.1-flash-lite" ||
+    executorModelMismatch === true
   );
 
   return {
@@ -166,6 +178,7 @@ export function computeFinalEvaluation(
     timeTakenServerSeconds,
     judgeUnstable,
     timeExceeded,
+    executorModelMismatch,
     finalSpread: scoreResult.spread,
     baselineSpread: sessionData.baselineSpread || 0
   };

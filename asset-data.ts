@@ -89,66 +89,6 @@ export const ROLE_PROFILES = {
     },
     requiredElements: ["A structured analytical frame (often MECE)", "A specific business problem or strategic question", "An identifiable client context (industry, scale, situation)", "A decision being made or recommended"],
     antiPatterns: ["Framework name-dropping without application", "Tasks resolvable without structured thinking", "Tasks with obvious answers", "Pure research tasks without a recommendation", "Tasks at real named companies"]
-  },
-  "Marketing": {
-    persona: "Marketing manager or strategist writing for marketing peers, creative partners, or leadership. The persona is audience-specific, channel-aware, and ties activity to measurable business objectives.",
-    taskArchetypes: {
-      "Beginner": ["Campaign brief", "email copy direction", "audience segment description", "simple positioning statement"],
-      "Intermediate": ["Multi-channel campaign strategy", "full positioning document", "content calendar rationale", "launch plan for a feature"],
-      "Advanced": ["Brand strategy doc", "market entry plan", "integrated campaign architecture", "segmentation framework revision"]
-    },
-    requiredElements: ["A specific audience segment", "A specific channel or media type", "A specific business objective or metric", "A specific product or category context"],
-    antiPatterns: ["Pure copywriting tasks", "Tasks about real named brands", "Tasks with no measurable objective", "Generic 'make this engaging' framing", "Tasks that conflate marketing with sales"]
-  },
-  "Sales": {
-    persona: "Account executive, sales manager, or sales leader writing for the sales team or for prospects. The persona is honest about deal realities and operates within real B2B sales motions.",
-    taskArchetypes: {
-      "Beginner": ["Discovery call summary", "follow-up email outline", "simple objection-handling note", "deal stage update"],
-      "Intermediate": ["Account strategy note", "deal review prep", "multi-stakeholder navigation plan", "competitive positioning note"],
-      "Advanced": ["Strategic account plan", "enterprise deal strategy", "sales process redesign", "complex deal review for a forecasted opportunity"]
-    },
-    requiredElements: ["A specific buyer persona or role", "A specific deal stage or sales motion", "Identifiable stakeholders", "A specific competitive or commercial context"],
-    antiPatterns: ["Pure prospecting or cold outreach tasks", "Tasks at real named companies", "Tasks resolvable with generic 'sell harder' or 'be more confident' advice", "Manipulative or ethically dubious framings", "Tasks that conflate sales with marketing"]
-  },
-  "Human Resources": {
-    persona: "HR business partner, recruiter, or people manager writing for managers, employees, or leadership. The persona is fairness-conscious, legally aware, and uses behavioral rather than trait-based language.",
-    taskArchetypes: {
-      "Beginner": ["Performance feedback note", "interview debrief", "policy explanation", "simple onboarding communication"],
-      "Intermediate": ["Hiring rubric", "compensation rationale", "performance improvement framing", "exit interview summary"],
-      "Advanced": ["Sensitive employee situation memo", "organizational design recommendation", "complex investigation summary", "executive coaching note"]
-    },
-    requiredElements: ["A specific role, team, or organizational context", "A specific people-related decision or situation", "Identifiable parties", "A specific HR concept"],
-    antiPatterns: ["Tasks that require actual legal advice on real situations", "Tasks involving real named people", "Tasks with protected-class characteristics central to the scenario", "Tasks resolvable without HR framework", "Tasks that minimize procedural fairness for narrative convenience"]
-  },
-  "Business Operations": {
-    persona: "Business operations manager, BizOps partner, or process owner writing for operational teams or leadership. The persona is systems-thinking, metrics-driven, and operates across functions.",
-    taskArchetypes: {
-      "Beginner": ["SOP draft", "process documentation", "simple capacity calculation", "vendor onboarding checklist"],
-      "Intermediate": ["Incident review", "process improvement proposal", "vendor selection analysis", "cross-functional workflow design"],
-      "Advanced": ["Capacity planning", "operational strategy doc", "complex process redesign", "organizational efficiency analysis"]
-    },
-    requiredElements: ["A specific process, service, or operational system", "Specific metrics", "A specific stakeholder or operational role", "A specific operational decision or change"],
-    antiPatterns: ["Tasks that are actually engineering tasks", "Tasks at real named companies", "Pure 'improve efficiency' tasks without specific levers", "Tasks resolvable without operational framework", "Tasks that ignore stakeholder coordination realities"]
-  },
-  "Content & Communications": {
-    persona: "Content strategist, editor, communications professional, or writer at varying seniority. The persona is audience-aware, voice-conscious, and ties craft to strategic purpose.",
-    taskArchetypes: {
-      "Beginner": ["Blog intro", "product description", "social post draft", "internal announcement", "simple FAQ entry"],
-      "Intermediate": ["Long-form article outline", "content series strategy", "internal change communication", "editorial guidelines section"],
-      "Advanced": ["Editorial strategy", "content pillar architecture", "voice and brand guidelines", "executive communications strategy"]
-    },
-    requiredElements: ["A specific audience and their context", "A specific content format and channel", "A specific business or editorial objective", "A specific voice or angle consideration"],
-    antiPatterns: ["Pure marketing tasks", "Tasks without audience specificity", "Generic 'make it more engaging' framing", "Tasks resolvable without craft consideration", "Tasks involving real journalists, publications, or public figures"]
-  },
-  "Customer Support": {
-    persona: "Support representative, support manager, or customer experience leader writing to customers, the support team, or leadership. The persona is solution-focused without being defensive, and balances individual resolution against systemic improvement.",
-    taskArchetypes: {
-      "Beginner": ["Customer response on a common issue", "FAQ entry", "escalation note", "simple incident communication"],
-      "Intermediate": ["Escalation analysis", "recurring issue pattern report", "support playbook section", "root-cause communication to product"],
-      "Advanced": ["Support strategy proposal", "automation and deflection analysis", "organizational redesign for support", "customer experience strategy"]
-    },
-    requiredElements: ["A specific customer context", "A specific support metric or quality consideration", "An identifiable interaction or pattern", "A specific support decision or process"],
-    antiPatterns: ["Pure complaint-handling without analysis", "Tasks at real named companies", "Tasks that do not reflect support-specific judgment", "Generic 'be nicer to customers' framing", "Tasks that conflate support with sales"]
   }
 };
 
@@ -187,35 +127,5 @@ export const FALLBACK_TASKS: Record<string, Record<string, { task: string; basel
     "Beginner": { task: "Draft a simple framework application (like SWOT) for a local coffee shop considering opening a second location.", baseline: "Strengths: Good coffee. Weaknesses: Only one store. Opportunities: Open a second store. Threats: Starbucks nearby. They should definitely open the second location." },
     "Intermediate": { task: "Write an executive update summarizing the initial findings of a 4-week supply chain optimization engagement.", baseline: "We looked at your supply chain. It's inefficient. You have too much inventory in the wrong warehouses. We recommend centralizing distribution immediately." },
     "Advanced": { task: "Draft a market entry strategy for a mid-sized US retail brand planning to expand into the Southeast Asian market.", baseline: "Southeast Asia is a growing market. You should partner with local distributors and launch a localized e-commerce site. The ROI will be positive within 12 months." }
-  },
-  "Marketing": {
-    "Beginner": { task: "Write a social media announcement post celebrating the arrival of a new organic tea blend in a cozy boutique cafe.", baseline: "Come down to our cafe to try our new organic tea blend! We have different flavors available and it is super healthy for you. Doors open at 8 AM daily." },
-    "Intermediate": { task: "Formulate an email campaign targeting inactive premium gym subscribers to sign up for an advanced 4-week nutritional consulting program.", baseline: "Subject: Important nutrition program. Hello, we see you haven't been visiting recently. We have an amazing 4-week health meal program launching next Monday for only $99. Please click here to join and improve your fitness journey today." },
-    "Advanced": { task: "Develop a promotional outreach campaign strategy to launch a boutique eco-friendly desk planner to regional corporate buyers.", baseline: "Send bulk newsletters detailing planner benefits (recycled elements, soy inks) to generic contact lists harvested from local Chamber of Commerce business directories." }
-  },
-  "Sales": {
-    "Beginner": { task: "Write a short follow-up email outline after a positive discovery call with a perspective client.", baseline: "Hi [Name], great speaking today. As discussed, our software can help you. Let me know when you want to sign the contract." },
-    "Intermediate": { task: "Draft an account strategy note for a mid-sized enterprise deal where the technical evaluator is currently favoring a competitor.", baseline: "The technical buyer likes the competitor's UI better. We should offer them a 20% discount if they sign this week to overcome that objection." },
-    "Advanced": { task: "Provide a complex deal review for a forecasted $500k opportunity that is stuck in the procurement phase due to security concerns.", baseline: "Procurement is asking for a SOC2 Type II report, which we don't have yet. We should assure them our system is secure and push the champion to bypass procurement so we hit our quarterly quota." }
-  },
-  "Human Resources": {
-    "Beginner": { task: "Draft a simple onboarding communication welcoming a new hire to the engineering team.", baseline: "Welcome to the team! Your laptop is on your desk. Ask Jim if you need anything. We do standup at 10am." },
-    "Intermediate": { task: "Write a performance improvement framing note for an employee who has been consistently missing deadlines.", baseline: "You have missed 3 deadlines this month. This is unacceptable. If you miss another deadline, we will have to let you go. Please try harder." },
-    "Advanced": { task: "Provide an organizational design recommendation for merging two previously siloed customer success teams after an acquisition.", baseline: "We should fire the redundant managers from the acquired company and put all the remaining reps under our existing VP of CS to streamline operations." }
-  },
-  "Business Operations": {
-    "Beginner": { task: "Draft a basic process documentation (SOP) for onboarding a new software vendor.", baseline: "1. Find a vendor. 2. Ask for pricing. 3. Sign the contract. 4. Give them a credit card for payment. 5. Start using the software." },
-    "Intermediate": { task: "Write an incident review summary for a recent failure where a critical supplier missed a delivery window.", baseline: "The supplier was late because of a storm. We told them to be on time next week. We should also look for a backup supplier just in case." },
-    "Advanced": { task: "Propose an operational strategy to reduce overall shipping costs by 15% in a national logistics network.", baseline: "To cut costs 15%, we should switch entirely to the cheapest ground shipping carrier available, even if transit times increase by 2 days, because customers care more about price than speed." }
-  },
-  "Content & Communications": {
-    "Beginner": { task: "Write a blog intro for a post about top 5 remote work productivity tips.", baseline: "In today's fast-paced world, remote work is more popular than ever. Here are 5 tips to help you be more productive while working from home." },
-    "Intermediate": { task: "Draft an internal change communication regarding a switch from Slack to Microsoft Teams.", baseline: "Hi everyone, we are switching from Slack to Teams on Friday to save money on licensing. Please download Teams and move your important files over before Slack is turned off." },
-    "Advanced": { task: "Develop an executive communications strategy for a CEO announcing a disappointing quarterly earnings report.", baseline: "The CEO should emphasize that the market is tough right now and competitors are also struggling. Downplay the missed revenue targets and highlight the minor increase in active users to keep morale high." }
-  },
-  "Customer Support": {
-    "Beginner": { task: "Write a FAQ entry explaining the company's 30-day return policy.", baseline: "You can return items within 30 days. You have to pay for shipping. We don't accept worn items. Contact support for a label." },
-    "Intermediate": { task: "Draft a root-cause communication to the product team regarding a spike in tickets about confusing navigation.", baseline: "We got 50 tickets today saying the new menu is confusing. Users can't find the settings page. Please change the menu back to how it was yesterday." },
-    "Advanced": { task: "Provide a support strategy proposal for handling a projected 200% increase in ticket volume during the upcoming holiday season.", baseline: "Since ticket volume will triple, we need to hire three times as many seasonal support reps immediately. Automation won't be fast enough to implement." }
   }
 };

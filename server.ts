@@ -15,14 +15,17 @@ import {
   computeFinalEvaluation,
   EXECUTOR_MODEL,
   EXECUTOR_TEMPERATURE,
+  JUDGE_MODEL,
   buildSelfRevisePrompt,
   generateGapManifest,
   judgePairedComparison,
   judgeManifestResolution,
   computeHeadroomShadow,
-  computePercentile
+  computePercentile,
+  aggregateRunResults,
+  ITEMS_PER_RUN
 } from "./server/headroom";
-import type { GapItem, HeadroomShadowResult } from "./server/headroom";
+import type { GapItem, HeadroomShadowResult, RunItemResult } from "./server/headroom";
 import {
   parseAdminKeys,
   isValidAdminKey,
@@ -43,6 +46,7 @@ app.use(express.json());
 let localSessions: any[] = [];
 let localAttempts: any[] = [];
 let localRubricVersions: any[] = [];
+let localRuns: any[] = [];
 let localAdminAuditLog: any[] = [];
 
 // Admin authentication keys: comma-separated ADMIN_KEYS (preferred, supports
@@ -156,6 +160,59 @@ async function robustGenerateContent(ai: GoogleGenAI, requestParams: any): Promi
   throw lastError;
 }
 
+// Resolves the test run a new item belongs to (docs/HEADROOM_MIGRATION_SPEC.md
+// §11): continues an in-progress run below ITEMS_PER_RUN items, or starts a
+// fresh one otherwise (no runId provided, run not found, or already full).
+async function getOrCreateRun(
+  providedRunId: string | undefined,
+  domain: string,
+  difficulty: string
+): Promise<{ runId: string; itemIndex: number }> {
+  const db = getFirestoreDb();
+
+  if (providedRunId) {
+    let run: any = null;
+    if (db !== null) {
+      const doc = await db.collection("testRuns").doc(providedRunId).get();
+      if (doc.exists) run = doc.data();
+    } else {
+      run = localRuns.find(r => r.runId === providedRunId);
+    }
+    if (run && Array.isArray(run.itemSessionIds) && run.itemSessionIds.length < ITEMS_PER_RUN) {
+      return { runId: providedRunId, itemIndex: run.itemSessionIds.length };
+    }
+  }
+
+  const runId = crypto.randomUUID();
+  const runRecord = {
+    runId,
+    domain,
+    difficulty,
+    itemsTotal: ITEMS_PER_RUN,
+    itemSessionIds: [] as string[],
+    createdAt: new Date().toISOString(),
+    status: "in_progress"
+  };
+  if (db !== null) {
+    await db.collection("testRuns").doc(runId).set(runRecord);
+  } else {
+    localRuns.push(runRecord);
+  }
+  return { runId, itemIndex: 0 };
+}
+
+async function appendSessionToRun(runId: string, sessionId: string) {
+  const db = getFirestoreDb();
+  if (db !== null) {
+    await db.collection("testRuns").doc(runId).update({
+      itemSessionIds: admin.firestore.FieldValue.arrayUnion(sessionId)
+    });
+  } else {
+    const run = localRuns.find(r => r.runId === runId);
+    if (run) run.itemSessionIds.push(sessionId);
+  }
+}
+
 // Admin Authentication Middleware
 function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (ADMIN_KEYS.length === 0) {
@@ -250,8 +307,6 @@ async function getActiveSystemPrompt(): Promise<string> {
 
 function getDomainSpecificExcellenceCriteria(domain: string): string {
   switch (domain) {
-    case "Marketing":
-      return "Focus on: Strategic coherence, audience insight, message clarity, persuasiveness, and measurable outcomes. Penalize generic or tone-deaf messaging.";
     case "Software Engineering":
       return "Focus on: Technical correctness, code quality, efficiency, maintainability, edge cases, and security considerations. Penalize hallucinated APIs, incorrect logic, or poor architectural decisions.";
     case "Product Management":
@@ -260,20 +315,10 @@ function getDomainSpecificExcellenceCriteria(domain: string): string {
       return "Focus on: Numerical accuracy, financial logic, risk assessment, regulatory awareness, and clear assumptions. Hard constraint: Any factual or calculation error in the improved output must significantly lower this dimension score.";
     case "Consulting & Strategy":
       return "Focus on: Structured problem-solving (e.g., MECE), hypothesis-driven reasoning, actionable recommendations, and executive-level clarity. Penalize fluffy or non-prioritized advice.";
-    case "Human Resources":
-      return "Focus on: Fairness, legal/ethical compliance, employee experience, clarity of communication, and organizational impact. Penalize biased, vague, or legally risky language.";
     case "Legal":
       return "Focus on: Legal accuracy, risk identification, precise language, and compliance. Hard constraint: Any hallucinated case law, incorrect legal principle, or compliance error must heavily penalize this dimension.";
     case "Data Analysis":
       return "Focus on: Analytical rigor, correct interpretation of data, appropriate methodology, and clear business implications. Penalize overgeneralization or statistical errors.";
-    case "Sales":
-      return "Focus on: Customer-centric reasoning, objection handling, value articulation, and closing logic. Penalize pushy or generic pitches.";
-    case "Business Operations":
-      return "Focus on: Process efficiency, risk mitigation, scalability, and measurable KPIs. Penalize unrealistic or poorly sequenced recommendations.";
-    case "Content & Communications":
-      return "Focus on: Audience fit, tone consistency, narrative flow, originality, and engagement. Penalize generic or AI-sounding content.";
-    case "Customer Support":
-      return "Focus on: Empathy, clarity, problem resolution, and tone appropriateness. Penalize robotic or unhelpful responses.";
     default:
       return "Use a balanced combination of the above criteria, weighted toward general reasoning quality, clarity, and practical value.";
   }
@@ -496,7 +541,7 @@ app.get("/api/health", (req, res) => {
 
 // 2. Task generation endpoint (with pre-scoring & 40-60 quality band loop)
 app.post("/api/generate-task", generateTaskLimiter, async (req, res) => {
-  const { domain, difficulty } = req.body;
+  const { domain, difficulty, runId: providedRunId } = req.body;
   if (!domain || !difficulty) {
     return res.status(400).json({ error: "Missing required params: domain, difficulty" });
   }
@@ -511,6 +556,7 @@ app.post("/api/generate-task", generateTaskLimiter, async (req, res) => {
   const defaultTime = diffDef.timeBudget || 120;
 
   try {
+    const { runId, itemIndex } = await getOrCreateRun(providedRunId, domain, difficulty);
     const ai = getGeminiClient();
     const activePrompt = await getActiveSystemPrompt();
 
@@ -733,7 +779,9 @@ Elements Included: [Brief description of the domain-specific elements included]
       rubricVersionId: activeRubricVersionId, // Store current rubric version ID (FIX 9.1 & 11.11)
       systemPrompt: activePrompt, // Keep versioned system prompt on the session (FIX 9.1 & 11.11)
       createdAt: new Date().toISOString(),
-      status: "active"
+      status: "active",
+      runId, // Headroom migration §11: groups this item with its sibling items in the same run
+      itemIndex
     };
 
     const db = getFirestoreDb();
@@ -742,6 +790,7 @@ Elements Included: [Brief description of the domain-specific elements included]
     } else {
       localSessions.push(sessionRecord);
     }
+    await appendSessionToRun(runId, sessionId);
 
     // Return sanitized task payload to client. baselinePrompt is what the
     // person edits directly — unlike gapManifest, it is meant to be seen.
@@ -752,13 +801,69 @@ Elements Included: [Brief description of the domain-specific elements included]
       baselinePrompt: selectedBaselinePrompt,
       timeLimitSeconds: defaultTime,
       domain,
-      difficulty
+      difficulty,
+      runId,
+      itemIndex,
+      itemsTotal: ITEMS_PER_RUN
     });
 
   } catch (error: any) {
     console.error("❌ Task generation fatal failure:", error);
     res.status(500).json({ error: "Failed to generate test task." });
   }
+});
+
+// 2b. Run aggregate endpoint (docs/HEADROOM_MIGRATION_SPEC.md §11): reports
+// per-item status/scores plus the cross-item mean +/- SE once items complete.
+app.get("/api/run/:runId", async (req, res) => {
+  const { runId } = req.params;
+  const db = getFirestoreDb();
+
+  let run: any = null;
+  if (db !== null) {
+    const doc = await db.collection("testRuns").doc(runId).get();
+    if (doc.exists) run = doc.data();
+  } else {
+    run = localRuns.find(r => r.runId === runId);
+  }
+
+  if (!run) {
+    return res.status(404).json({ error: "Run not found." });
+  }
+
+  const itemSessionIds: string[] = Array.isArray(run.itemSessionIds) ? run.itemSessionIds : [];
+
+  const items: RunItemResult[] = [];
+  for (const sessionId of itemSessionIds) {
+    let attempt: any = null;
+    let session: any = null;
+    if (db !== null) {
+      const [attemptDoc, sessionDoc] = await Promise.all([
+        db.collection("attempts").doc(sessionId).get(),
+        db.collection("sessions").doc(sessionId).get()
+      ]);
+      if (attemptDoc.exists) attempt = attemptDoc.data();
+      if (sessionDoc.exists) session = sessionDoc.data();
+    } else {
+      attempt = localAttempts.find(a => a.sessionId === sessionId);
+      session = localSessions.find(s => s.sessionId === sessionId);
+    }
+
+    items.push({
+      sessionId,
+      domain: attempt?.domain || session?.domain || run.domain,
+      difficulty: attempt?.difficulty || session?.difficulty || run.difficulty,
+      score: typeof attempt?.score === "number" ? attempt.score : 0,
+      headroomScoreShadow: typeof attempt?.headroomShadow?.headroomScoreShadow === "number"
+        ? attempt.headroomShadow.headroomScoreShadow
+        : null,
+      comparable: attempt?.comparable === true,
+      status: attempt?.status === "completed" || attempt?.status === "rejected" ? attempt.status : "scoring_pending"
+    });
+  }
+
+  const aggregate = aggregateRunResults(run.itemsTotal || ITEMS_PER_RUN, items);
+  res.json({ runId, domain: run.domain, difficulty: run.difficulty, ...aggregate });
 });
 
 // 3. Evaluation endpoint (Highly secure scoring pipeline)
@@ -1009,7 +1114,14 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
       baselineSpread: sessionData.baselineSpread || 0,
       guardrail: finalEvaluation.triageFlags.guardrailFired ? finalEvaluation.triageFlags.reason : "none",
       regexInjectionSuspected, // Headroom migration Phase 5: advisory signal, kept for audit even when it didn't zero the score
-      headroomShadow // Headroom migration Phase 2: new-architecture score, logged for comparison only
+      headroomShadow, // Headroom migration Phase 2: new-architecture score, logged for comparison only
+      // Judge/executor re-equating policy (docs/HEADROOM_MIGRATION_SPEC.md
+      // §16.5): the pinned model versions actually used to score this
+      // attempt, recorded so a future model upgrade can be detected and
+      // scores from different eras equated via scripts/judge-reequate.ts
+      // rather than silently compared as if on the same scale.
+      judgeModel: JUDGE_MODEL,
+      executorModel: sessionData.executorModel || EXECUTOR_MODEL
     };
 
     if (db !== null) {
