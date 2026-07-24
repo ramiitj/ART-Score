@@ -22,7 +22,6 @@ function makePass(overrides: Partial<JudgePassResult> = {}): JudgePassResult {
     diffInventory: [],
     selfChecks: "self checks",
     confidence: "high",
-    mitigationAssessment: [],
     integrityViolation: false,
     ...overrides
   };

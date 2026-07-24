@@ -3,12 +3,6 @@ export interface DiffInventoryItem {
   classification: string;
 }
 
-export interface MitigationAssessmentItem {
-  failureModeId: string;
-  mitigated: boolean;
-  rationale: string;
-}
-
 export interface JudgePassResult {
   clarityScore: number;
   clarityRationale: string;
@@ -25,7 +19,6 @@ export interface JudgePassResult {
   diffInventory?: DiffInventoryItem[];
   selfChecks: string;
   confidence: string;
-  mitigationAssessment?: MitigationAssessmentItem[];
   integrityViolation: boolean;
 }
 

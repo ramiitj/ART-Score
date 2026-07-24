@@ -22,10 +22,11 @@ export default function App() {
   const [difficulty, setDifficulty] = useState("");
   const [task, setTask] = useState("");
   const [baseline, setBaseline] = useState("");
+  const [baselinePrompt, setBaselinePrompt] = useState("");
   const [baselineQualityScore, setBaselineQualityScore] = useState(50);
   const [headroom, setHeadroom] = useState(50);
   const [failureModeTags, setFailureModeTags] = useState("");
-  const [revision, setRevision] = useState("");
+  const [editedPrompt, setEditedPrompt] = useState("");
   
   // Dynamic timer details
   const [timeLimitSeconds, setTimeLimitSeconds] = useState(90);
@@ -96,6 +97,7 @@ export default function App() {
       setSessionId(data.sessionId || "");
       setTask(data.task || "Construct an optimized implementation guideline...");
       setBaseline(data.baseline || "Simple generic implementation text...");
+      setBaselinePrompt(data.baselinePrompt || "");
       setBaselineQualityScore(0);
       setHeadroom(0);
       setFailureModeTags("");
@@ -111,9 +113,9 @@ export default function App() {
     }
   };
 
-  // 2. Submission of user revision -> Start rating processing
-  const handleSubmitRevision = async (editedRevision: string, elapsedSeconds: number) => {
-    setRevision(editedRevision);
+  // 2. Submission of the user's edited prompt -> Start rating processing
+  const handleSubmitRevision = async (submittedEditedPrompt: string, elapsedSeconds: number) => {
+    setEditedPrompt(submittedEditedPrompt);
     setTimeTaken(elapsedSeconds);
     setStep(TestStep.EVALUATING);
 
@@ -123,7 +125,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          revision: editedRevision,
+          editedPrompt: submittedEditedPrompt,
         }),
       });
       const evalData = await res.json();
@@ -167,7 +169,8 @@ export default function App() {
     setDifficulty("");
     setTask("");
     setBaseline("");
-    setRevision("");
+    setBaselinePrompt("");
+    setEditedPrompt("");
     setTimeLimitSeconds(90);
     setTimeTaken(0);
     setEvaluation(null);
@@ -244,6 +247,7 @@ export default function App() {
                 difficulty={difficulty}
                 task={task}
                 baseline={baseline}
+                baselinePrompt={baselinePrompt}
                 timeLimitSeconds={timeLimitSeconds}
                 onSubmit={handleSubmitRevision}
               />
@@ -262,7 +266,7 @@ export default function App() {
                 difficulty={difficulty}
                 task={task}
                 baseline={baseline}
-                revision={revision}
+                editedPrompt={editedPrompt}
                 evaluation={evaluation}
                 onRestart={handleRestart}
                 age={age}

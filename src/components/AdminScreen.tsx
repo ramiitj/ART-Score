@@ -152,7 +152,7 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
       "System Touch",
       "Task Description",
       "AI Baseline Document",
-      "Human Refinement Revision",
+      "Human Edited Prompt",
       "Feedback Comment",
       "Judge Model Version",
       "Judge Prompt Hash",
@@ -204,7 +204,7 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
       const touch = att.systemDetails?.touchSupported !== undefined ? String(att.systemDetails.touchSupported) : "";
       const task = att.task || "";
       const baseline = att.baseline || "";
-      const revision = att.revision || "";
+      const revision = att.editedPrompt || "";
       const feedback = att.feedback || "";
       
       const evalMetadata = att.evaluation?.judgeMetadata;
@@ -619,13 +619,13 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
                                     </div>
                                   </div>
 
-                                  {/* User Revision */}
+                                  {/* User Edited Prompt */}
                                   <div className="space-y-1.5 p-3 bg-white border border-neutral-150 rounded-lg">
                                     <h4 className="font-mono text-[9px] uppercase tracking-wider text-neutral-400 font-bold flex items-center gap-1">
-                                      <Cpu className="w-3.5 h-3.5 text-neutral-500" /> CANDIDATE HUMAN REFINEMENT
+                                      <Cpu className="w-3.5 h-3.5 text-neutral-500" /> CANDIDATE HUMAN EDITED PROMPT
                                     </h4>
                                     <div className="mt-2 text-neutral-750 font-sans leading-relaxed text-[11px] whitespace-pre-wrap max-h-56 overflow-y-auto pr-1">
-                                      {att.revision}
+                                      {att.editedPrompt}
                                     </div>
                                     <div className="pt-2 border-t border-neutral-100 mt-2 flex items-center justify-between text-[10px] text-neutral-500 font-mono">
                                       <span>Time taken: {att.timeTaken}s (of {att.timeAllocated}s)</span>

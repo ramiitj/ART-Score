@@ -65,7 +65,8 @@ export interface AttemptLog {
   difficulty: string;
   task: string;
   baseline: string;
-  revision: string;
+  baselinePrompt?: string;
+  editedPrompt: string;
   score: number;
   evaluation: EvaluationResult;
   timestamp: string;

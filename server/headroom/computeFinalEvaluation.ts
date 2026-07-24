@@ -135,8 +135,7 @@ export function computeFinalEvaluation(
       modelVersion: "gemini-3.1-pro-preview",
       promptHash,
       temperature: 0,
-      rubricVersionId: sessionData.rubricVersionId,
-      mitigationAssessment: rulingPass.mitigationAssessment
+      rubricVersionId: sessionData.rubricVersionId
     },
     triageFlags: { guardrailFired, reason: guardrailReason, capApplied },
     textTelemetry: {

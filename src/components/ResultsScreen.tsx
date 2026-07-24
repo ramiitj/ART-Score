@@ -11,7 +11,7 @@ interface ResultsProps {
   difficulty: string;
   task: string;
   baseline: string;
-  revision: string;
+  editedPrompt: string;
   evaluation: EvaluationResult;
   onRestart: () => void;
   age: string;
@@ -31,7 +31,7 @@ export default function ResultsScreen({
   difficulty,
   task,
   baseline,
-  revision,
+  editedPrompt,
   evaluation,
   onRestart,
   age,
@@ -200,7 +200,7 @@ export default function ResultsScreen({
     return () => {
       active = false;
     };
-  }, [userName, userEmail, domain, difficulty, task, baseline, revision, evaluation, age, gender, education, workExperience, researchConsent, timeAllocated, timeTaken]);
+  }, [userName, userEmail, domain, difficulty, task, baseline, editedPrompt, evaluation, age, gender, education, workExperience, researchConsent, timeAllocated, timeTaken]);
 
   // Generate clean, salient score content for sharing
   const getShareText = () => {

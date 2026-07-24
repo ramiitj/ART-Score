@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Clock, AlertCircle, Sparkles, Copy, FileText, CheckCircle2, ChevronRight, RefreshCw, ShieldAlert } from "lucide-react";
+import { Clock, AlertCircle, FileText, CheckCircle2, ChevronRight, RefreshCw, ShieldAlert, RotateCcw } from "lucide-react";
 
 interface ActiveTestProps {
   userName: string;
@@ -8,8 +8,9 @@ interface ActiveTestProps {
   difficulty: string;
   task: string;
   baseline: string;
+  baselinePrompt: string;
   timeLimitSeconds: number;
-  onSubmit: (revision: string, timeTaken: number) => void;
+  onSubmit: (editedPrompt: string, timeTaken: number) => void;
 }
 
 export default function ActiveTestScreen({
@@ -18,11 +19,12 @@ export default function ActiveTestScreen({
   difficulty,
   task,
   baseline,
+  baselinePrompt,
   timeLimitSeconds,
   onSubmit,
 }: ActiveTestProps) {
-  const [timeLeft, setTimeLeft] = useState(timeLimitSeconds); 
-  const [revision, setRevision] = useState("");
+  const [timeLeft, setTimeLeft] = useState(timeLimitSeconds);
+  const [editedPrompt, setEditedPrompt] = useState(baselinePrompt);
   const [isTimeUp, setIsTimeUp] = useState(false);
   const [warningMessage, setWarningMessage] = useState("");
   const [tipIndex, setTipIndex] = useState(0);
@@ -30,11 +32,11 @@ export default function ActiveTestScreen({
 
   // Auto-rotating guidance tutorial tooltips
   const tips = [
-    "Tip: Clone the prompt guidelines above to reference or establish structured instructions.",
-    "Tip: Focus your revised protocol on introducing specific professional conditions & edge cases.",
-    "Tip: Rephrase rules logically. Identical submissions to the raw baseline will yield a score of 0.",
+    "Tip: Edit the prompt directly — the AI will re-run it to produce your final output.",
+    "Tip: Add the specific professional conditions and edge cases the original prompt is missing.",
+    "Tip: Submitting the prompt unchanged will yield a score of 0 — the AI must be steered, not just accepted.",
     "Tip: Keep writing! Paste commands are securely blocked to ensure true cognitive verification.",
-    "Tip: Keep your adjustments crisp and descriptive within the remaining test period."
+    "Tip: Keep your edits crisp and specific within the remaining test period."
   ];
 
   useEffect(() => {
@@ -53,9 +55,9 @@ export default function ActiveTestScreen({
   const formattedTask = cleanFormat(task);
   const formattedBaseline = cleanFormat(baseline);
 
-  const handleCopyInput = () => {
-    setRevision(formattedTask);
-    triggerWarning("Task Directions scenario cloned to workspace.");
+  const handleResetPrompt = () => {
+    setEditedPrompt(baselinePrompt);
+    triggerWarning("Prompt reset to the original baseline.");
   };
 
   const triggerWarning = (msg: string) => {
@@ -132,16 +134,16 @@ export default function ActiveTestScreen({
   useEffect(() => {
     if (isTimeUp) {
       setTimeout(() => {
-        onSubmit(revision || "[Empty Submission - Time Ran Out]", timeLimitSeconds);
+        onSubmit(editedPrompt || "[Empty Submission - Time Ran Out]", timeLimitSeconds);
       }, 1500);
     }
-  }, [isTimeUp, onSubmit, revision, timeLimitSeconds]);
+  }, [isTimeUp, onSubmit, editedPrompt, timeLimitSeconds]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (timerRef.current) clearInterval(timerRef.current);
     const timeTaken = timeLimitSeconds - timeLeft;
-    onSubmit(revision || "[Empty Submission]", timeTaken);
+    onSubmit(editedPrompt || "[Empty Submission]", timeTaken);
   };
 
   const handlePastePrevent = (e: React.ClipboardEvent) => {
@@ -197,7 +199,7 @@ export default function ActiveTestScreen({
             </span>
           </div>
 
-          {/* Task Scenario Box (Prompt window) with CLONE BUTTON against it! */}
+          {/* Task Scenario Box (context only — the editable prompt lives in the right column) */}
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-center pb-1">
               <div className="flex items-center gap-2 text-neutral-800">
@@ -206,23 +208,13 @@ export default function ActiveTestScreen({
                   1. Task Directions & Input Scenario
                 </h3>
               </div>
-              <button
-                type="button"
-                onClick={handleCopyInput}
-                disabled={timeLeft === 0}
-                className="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded px-2.5 py-1 text-[10px] font-bold tracking-wide transition-all cursor-pointer disabled:opacity-50"
-                title="Clones the raw question scenario instructions text into your workspace field."
-              >
-                <Copy className="w-3 h-3" />
-                Clone Prompt Draft
-              </button>
             </div>
             <div className="text-neutral-700 text-xs leading-relaxed font-sans whitespace-pre-line select-none font-medium bg-white p-4 border border-neutral-200 rounded-md">
               {formattedTask}
             </div>
           </div>
 
-          {/* AI Baseline Reference Box (No clone button, as the response draft is not available to clone) */}
+          {/* AI Baseline Reference Box: shows what the CURRENT prompt produces, read-only */}
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-center pb-1">
               <div className="flex items-center gap-2 text-neutral-800">
@@ -239,16 +231,26 @@ export default function ActiveTestScreen({
 
         </div>
 
-        {/* RIGHT COLUMN: Writing Intervention Panel */}
+        {/* RIGHT COLUMN: Prompt Editing Panel */}
         <div className="bg-white rounded-lg p-4 border border-neutral-200 shadow-sm flex flex-col h-full min-h-0 gap-3 lg:p-5">
           <div className="flex flex-col flex-1 min-h-0">
             <div className="flex justify-between items-center pb-2.5 mb-3 border-b border-neutral-200 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-1.5 h-4 bg-amber-500 rounded-sm"></div>
                 <h3 className="text-xs font-black uppercase tracking-wider text-neutral-800 font-sans">
-                  3. Your Refined Response Workspace
+                  3. Edit the Baseline Prompt
                 </h3>
               </div>
+              <button
+                type="button"
+                onClick={handleResetPrompt}
+                disabled={timeLeft === 0}
+                className="inline-flex items-center gap-1 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-neutral-600 rounded px-2.5 py-1 text-[10px] font-bold tracking-wide transition-all cursor-pointer disabled:opacity-50"
+                title="Resets your edits back to the original baseline prompt."
+              >
+                <RotateCcw className="w-3 h-3" />
+                Reset to Original
+              </button>
             </div>
 
             {/* Warning Message Bar */}
@@ -267,10 +269,10 @@ export default function ActiveTestScreen({
             </AnimatePresence>
 
             <textarea
-              value={revision}
-              onChange={(e) => setRevision(e.target.value)}
+              value={editedPrompt}
+              onChange={(e) => setEditedPrompt(e.target.value)}
               onPaste={handlePastePrevent}
-              placeholder="Supply clear, prescriptive rules or template changes that correct raw errors, improve logical hierarchy, or specify high-caliber structural patterns..."
+              placeholder="Edit this prompt directly — add the missing constraints, specifics, or structure that would make the AI's response excellent..."
               disabled={timeLeft === 0}
               className="w-full flex-1 min-h-[220px] lg:min-h-0 rounded-md border border-neutral-300 p-4 text-xs text-neutral-850 focus:outline-none focus:border-neutral-900 focus:bg-white transition-all font-sans font-medium resize-none bg-neutral-50/10 leading-relaxed placeholder:text-neutral-400"
               required
@@ -284,7 +286,7 @@ export default function ActiveTestScreen({
             </span>
             <button
               type="submit"
-              disabled={timeLeft === 0 || !revision.trim()}
+              disabled={timeLeft === 0 || !editedPrompt.trim()}
               className="inline-flex items-center justify-center gap-1.5 bg-neutral-900 hover:bg-neutral-950 active:bg-black text-white text-xs font-bold py-2.5 px-6 rounded-md shadow-md hover:shadow-lg disabled:opacity-50 transition-all cursor-pointer"
             >
               Submit Reflection Response

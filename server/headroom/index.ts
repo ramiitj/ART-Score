@@ -16,7 +16,7 @@ export { buildGapManifestPrompt, buildManifestResolutionPrompt, aggregateManifes
 export { judgePairedComparison, judgeManifestResolution } from "./judge";
 export { generateGapManifest } from "./generator";
 export { computeHeadroomShadow } from "./headroomShadow";
-export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem, MitigationAssessmentItem } from "./types";
+export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem } from "./types";
 export type {
   GapItem,
   PairedPassRaw,
