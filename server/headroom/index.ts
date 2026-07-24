@@ -21,6 +21,14 @@ export { computePercentile, MIN_PERCENTILE_SAMPLE_SIZE } from "./percentile";
 export { decomposeVariance, MIN_REPEATED_PERSONS_FOR_RELIABLE_ESTIMATE } from "./varianceDecomposition";
 export { aggregateRunResults } from "./aggregateRun";
 export { computeEquatingOffset, applyEquatingOffset, MIN_ANCHOR_ITEMS_FOR_RELIABLE_EQUATING } from "./reequating";
+export { computeScoreShiftReport } from "./scoreShiftReport";
+export { assessCeilingStability } from "./ceilingStability";
+export {
+  computeElevationMonitor,
+  computeObsolescenceMonitor,
+  MIN_SAMPLE_SIZE_FOR_ELEVATION_MONITOR,
+  MIN_SAMPLE_SIZE_PER_ERA
+} from "./validityMonitors";
 export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem } from "./types";
 export type {
   GapItem,
@@ -37,3 +45,6 @@ export type { PercentileResult } from "./percentile";
 export type { VarianceDecompositionRecord, VarianceDecompositionResult, OneWayVarianceShare } from "./varianceDecomposition";
 export type { RunItemResult, RunAggregate } from "./aggregateRun";
 export type { AnchorItemPair, EquatingResult } from "./reequating";
+export type { ScoreShiftRecord, ScoreShiftReport } from "./scoreShiftReport";
+export type { CeilingStabilityResult } from "./ceilingStability";
+export type { ElevationMonitorResult, ModelEraRecord, ModelEraHeadroom, ObsolescenceMonitorResult } from "./validityMonitors";

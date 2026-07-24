@@ -366,8 +366,8 @@ function computeHeadroom(session, paired, resolution): HeadroomScore {
 
 ## 8. Reliability & comparability
 
-- **`comparable = false`** if any of: served from live fallback (not calibrated bank), `judgeUnstable` (paired disagreement + resolution disagreement), injection/blank/identical, time budget exceeded, or executor/judge model not the pinned version. (Same spirit as the current `comparable` flag, minus the flaw-band logic.)
-- **Self-revised ceiling stability:** run `Bsr` twice; if the two ceilings' paired comparison is a coin-flip, ceiling is stable; if one dominates, take the stronger (the ceiling must be the model's *best* self-revision) and record `selfRevisedSpread`.
+- **`comparable = false`** if any of: served from live fallback (not calibrated bank), `judgeUnstable` (paired disagreement + resolution disagreement), injection/blank/identical, time budget exceeded, or executor/judge model not the pinned version. (Same spirit as the current `comparable` flag, minus the flaw-band logic.) **Implemented:** `computeFinalEvaluation()` now includes `executorModelMismatch` (session's `executorModel` vs the currently pinned `EXECUTOR_MODEL`) in the `comparable` gate.
+- **Self-revised ceiling stability — implemented.** `Bsr` now runs twice per session (`server.ts`'s self-revision block); the two candidates are blind-compared via the existing `judgePairedComparison()`, and `assessCeilingStability()` (`server/headroom/ceilingStability.ts`) decides: a mixed/split result (coin-flip) means the ceiling is stable and either candidate is used; a unanimous result means one dominates and that one is used as `selfRevisedOutput`. Recorded as `selfRevisedCeilingStable` on the session. Note: this doubles the self-revision generation calls and adds one more 3-pass blind judge comparison per item generated — a real added cost/latency to `/api/generate-task`, accepted because this is a correctness fix for a shadow-mode-only measurement (it never changes what's surfaced to the user).
 - **Standard error:** derive `headroomSE` from pass disagreement in §5.1/§5.2.
 
 ---
@@ -425,9 +425,9 @@ The single-item design cannot separate a person's capacity from item difficulty.
 
 Bake the paper's falsifiability conditions in as live checks, not one-off studies:
 
-- **Elevation monitor:** ongoing rate at which steered beats self-revised in blind paired comparison across people/domains. If this drops to chance, the construct is empty — surface it.
-- **Obsolescence monitor:** track mean Headroom over model generations; if a model upgrade collapses Headroom toward zero, the instrument should *record its own obsolescence* (continual learning solved) rather than hide it.
-- **Validation battery hooks:** optional post-test measures to establish convergent/discriminant validity — positive-but-imperfect correlation with evaluative expertise (Amabile CAT), relation to domain knowledge, and near-independence from Need for Cognition.
+- **Elevation monitor — implemented as an on-demand report.** `computeElevationMonitor()` (`server/headroom/validityMonitors.ts`) reports the mean `pSteered` (rate at which steered beats self-revised in blind paired comparison) across comparable attempts, flagging `atOrNearChance` once sample size is sufficient (`MIN_SAMPLE_SIZE_FOR_ELEVATION_MONITOR = 20`) and the mean sits at or below 0.55. Run via `npx tsx scripts/validity-monitors.ts <attempts-export.json>` (`npm run analyze:validity`). Not yet a live/scheduled check — that requires a real attempts volume and a notification channel, neither of which exist yet; this is the on-demand precursor.
+- **Obsolescence monitor — implemented as an on-demand report,** in the same script. `computeObsolescenceMonitor()` groups attempts by `executorModel`, computes each era's mean `headroomScoreShadow`, and flags `possibleObsolescence` when the most recent sufficiently-sampled era (`MIN_SAMPLE_SIZE_PER_ERA = 20`) collapses toward zero (≤0.1) after an earlier era showed meaningful Headroom (≥0.2). No real model transition has occurred yet in this system's data to actually trigger this.
+- **Validation battery hooks:** optional post-test measures to establish convergent/discriminant validity — positive-but-imperfect correlation with evaluative expertise (Amabile CAT), relation to domain knowledge, and near-independence from Need for Cognition. Not started — this needs a product decision on what post-test instrument to administer and to whom.
 
 ---
 
@@ -456,7 +456,7 @@ Bake the paper's falsifiability conditions in as live checks, not one-off studie
 - **Unit:** BT aggregation (0/1/2/3 wins → probabilities, regularized log-odds), `R` with `closableN=0`, `E` at `changeFrac=0`, validity-gate on/off, PII/manifest stripping from client payloads.
 - **Structural (Table 2):** property tests asserting the judge payload contains no identity/order/preference signal and that pass order is randomized.
 - **Golden:** fixed (task, manifest, ceiling, steered) fixtures → stable `R`, `E`, gate.
-- **Regression harness:** replay a sample of historical attempts through old vs new scorer; publish the score-shift report before Phase 4.
+- **Regression harness — implemented.** `computeScoreShiftReport()` (`server/headroom/scoreShiftReport.ts`) compares the legacy score against `headroomShadow` (already computed on every real attempt) across a historical attempts export: mean of each, mean shift, Pearson correlation, and the validity-gate pass/fail split. Run via `npx tsx scripts/regression-harness.ts <attempts-export.json>` (`npm run analyze:regression`). This report should be run and reviewed before the Phase 4 cutover proceeds — it has not yet been run against real data, since no real attempts exist in this sandbox.
 
 ---
 

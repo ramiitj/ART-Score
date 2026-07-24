@@ -11,7 +11,9 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "analyze:variance": "tsx scripts/variance-decomposition.ts",
-    "analyze:reequate": "tsx scripts/judge-reequate.ts"
+    "analyze:reequate": "tsx scripts/judge-reequate.ts",
+    "analyze:regression": "tsx scripts/regression-harness.ts",
+    "analyze:validity": "tsx scripts/validity-monitors.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

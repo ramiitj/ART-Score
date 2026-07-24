@@ -23,7 +23,8 @@ import {
   computeHeadroomShadow,
   computePercentile,
   aggregateRunResults,
-  ITEMS_PER_RUN
+  ITEMS_PER_RUN,
+  assessCeilingStability
 } from "./server/headroom";
 import type { GapItem, HeadroomShadowResult, RunItemResult } from "./server/headroom";
 import {
@@ -719,20 +720,41 @@ Elements Included: [Brief description of the domain-specific elements included]
     }
 
     // Headroom migration Phase 1 (shadow mode): run the model's own self-revision
-    // of the baseline under the pinned Executor, and score it with the existing
-    // judge purely for instrumentation. This does not affect the score returned
-    // below — it only records the self-revised ceiling and its stability so the
-    // Headroom denominator can later be anchored against it (see docs/HEADROOM_MIGRATION_SPEC.md).
+    // of the baseline under the pinned Executor. Two independent self-revisions
+    // are generated and blind-compared (§8 ceiling stability check) so the
+    // ceiling used downstream is the model's *best* self-revision rather than
+    // an arbitrary single draw -- if the comparison is a coin-flip, either is
+    // fine and the ceiling is stable; if one dominates, that one is used.
+    // This does not affect the score returned below — it only records the
+    // self-revised ceiling so the Headroom denominator can later be anchored
+    // against it (see docs/HEADROOM_MIGRATION_SPEC.md).
     let selfRevisedOutput = "";
     let selfRevisedQualityScore: number | null = null;
     let selfRevisedSpread: number | null = null;
+    let selfRevisedCeilingStable: boolean | null = null;
     try {
-      const selfReviseRes = await ai.models.generateContent({
-        model: EXECUTOR_MODEL,
-        contents: buildSelfRevisePrompt(selectedTask, selectedBaseline),
-        config: { temperature: EXECUTOR_TEMPERATURE }
-      });
-      selfRevisedOutput = selfReviseRes.text || "";
+      const selfRevisePrompt = buildSelfRevisePrompt(selectedTask, selectedBaseline);
+      const [selfReviseResA, selfReviseResB] = await Promise.all([
+        ai.models.generateContent({ model: EXECUTOR_MODEL, contents: selfRevisePrompt, config: { temperature: EXECUTOR_TEMPERATURE } }),
+        ai.models.generateContent({ model: EXECUTOR_MODEL, contents: selfRevisePrompt, config: { temperature: EXECUTOR_TEMPERATURE } })
+      ]);
+      const revisionA = selfReviseResA.text || "";
+      const revisionB = selfReviseResB.text || "";
+
+      if (revisionA && revisionB) {
+        const paired = await judgePairedComparison(ai, selectedTask, revisionA, revisionB);
+        if (paired) {
+          const stability = assessCeilingStability(paired);
+          selfRevisedCeilingStable = stability.stable;
+          selfRevisedOutput = stability.strongerOutput === "B" ? revisionB : revisionA;
+        } else {
+          // Blind comparison failed (e.g. judge model error) -- fall back to
+          // the first draw rather than losing the ceiling entirely.
+          selfRevisedOutput = revisionA;
+        }
+      } else {
+        selfRevisedOutput = revisionA || revisionB;
+      }
 
       if (selfRevisedOutput) {
         const selfReviseScore = await scoreOutputThreePass(
@@ -775,6 +797,7 @@ Elements Included: [Brief description of the domain-specific elements included]
       selfRevisedOutput, // Headroom migration Phase 1 (shadow): self-revised ceiling, never sent to client
       selfRevisedQualityScore,
       selfRevisedSpread,
+      selfRevisedCeilingStable, // Headroom migration §8: null if the stability check couldn't run, else true/false
       gapManifest, // Headroom migration Phase 2 (shadow): hidden gap manifest, never sent to client
       rubricVersionId: activeRubricVersionId, // Store current rubric version ID (FIX 9.1 & 11.11)
       systemPrompt: activePrompt, // Keep versioned system prompt on the session (FIX 9.1 & 11.11)
