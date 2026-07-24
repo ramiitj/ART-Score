@@ -8,7 +8,7 @@ import "firebase/compat/firestore";
 import dotenv from "dotenv";
 
 import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, FAILURE_MODES, FALLBACK_TASKS, FAILURE_MODE_IDS } from "./asset-data";
-import { MASTER_SYSTEM_PROMPT, maskName, aggregatePasses, computeFinalEvaluation } from "./server/headroom";
+import { MASTER_SYSTEM_PROMPT, maskName, aggregatePasses, computeFinalEvaluation, EXECUTOR_MODEL, EXECUTOR_TEMPERATURE, buildSelfRevisePrompt } from "./server/headroom";
 
 dotenv.config();
 
@@ -611,6 +611,35 @@ Elements Included: [Brief description of the domain-specific elements included]
     const sFlawId = selectedSecondaryFlaw ? (FAILURE_MODE_IDS[selectedSecondaryFlaw] || "GEN-002") : "";
     const flawsInjected = [pFlawId, sFlawId].filter(Boolean);
 
+    // Headroom migration Phase 1 (shadow mode): run the model's own self-revision
+    // of the baseline under the pinned Executor, and score it with the existing
+    // judge purely for instrumentation. This does not affect the score returned
+    // below — it only records the self-revised ceiling and its stability so the
+    // Headroom denominator can later be anchored against it (see docs/HEADROOM_MIGRATION_SPEC.md).
+    let selfRevisedOutput = "";
+    let selfRevisedQualityScore: number | null = null;
+    let selfRevisedSpread: number | null = null;
+    try {
+      const selfReviseRes = await ai.models.generateContent({
+        model: EXECUTOR_MODEL,
+        contents: buildSelfRevisePrompt(selectedTask, selectedBaseline),
+        config: { temperature: EXECUTOR_TEMPERATURE }
+      });
+      selfRevisedOutput = selfReviseRes.text || "";
+
+      if (selfRevisedOutput) {
+        const selfReviseScore = await scoreOutputThreePass(
+          ai, activePrompt, selectedTask, selfRevisedOutput, "", domain, difficulty, true
+        );
+        if (selfReviseScore) {
+          selfRevisedQualityScore = selfReviseScore.total;
+          selfRevisedSpread = selfReviseScore.spread;
+        }
+      }
+    } catch (err) {
+      console.warn("[Self-Revision Shadow] Failed to compute self-revised ceiling for session; continuing without it.", err);
+    }
+
     // Create a new secure server-side session record
     const sessionId = crypto.randomUUID();
     const sessionRecord = {
@@ -628,6 +657,11 @@ Elements Included: [Brief description of the domain-specific elements included]
       domain,
       difficulty,
       generationModelUsed: usedModel,
+      executorModel: EXECUTOR_MODEL, // Headroom migration Phase 1: pinned Executor provenance
+      executorTemperature: EXECUTOR_TEMPERATURE,
+      selfRevisedOutput, // Headroom migration Phase 1 (shadow): self-revised ceiling, never sent to client
+      selfRevisedQualityScore,
+      selfRevisedSpread,
       rubricVersionId: activeRubricVersionId, // Store current rubric version ID (FIX 9.1 & 11.11)
       systemPrompt: activePrompt, // Keep versioned system prompt on the session (FIX 9.1 & 11.11)
       createdAt: new Date().toISOString(),
@@ -763,7 +797,7 @@ app.post("/api/evaluate-revision", async (req, res) => {
 
     const ai = getGeminiClient();
 
-    // Step 1: Execute User's Revision instructions on gemini-3.5-flash
+    // Step 1: Execute User's Revision instructions under the pinned Executor
     const roleProfile = ROLE_PROFILES[sessionData.domain as keyof typeof ROLE_PROFILES] || ROLE_PROFILES["General Knowledge Work"];
     const execPrompt = `You are an AI assistant acting as the following professional persona:
 "${roleProfile.persona || "Expert professional"}"
@@ -783,8 +817,9 @@ Generate the final expanded output. Output only the final result with zero meta-
 
     console.log("Executing user's revision prompt...");
     const execRes = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: execPrompt
+      model: EXECUTOR_MODEL,
+      contents: execPrompt,
+      config: { temperature: EXECUTOR_TEMPERATURE }
     });
     improvedOutput = execRes.text || "Execution finished.";
 
@@ -1457,8 +1492,9 @@ ${attempt.revision}
 Generate the final expanded output. Output only the final result with zero meta-commentary, introductory remarks, or structural headers about the user instructions.`;
 
         const execRes = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: execPrompt
+          model: EXECUTOR_MODEL,
+          contents: execPrompt,
+          config: { temperature: EXECUTOR_TEMPERATURE }
         });
         textToEvaluate = execRes.text || "Execution finished.";
       }

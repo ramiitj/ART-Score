@@ -7,3 +7,10 @@ All generation output MUST be plain-text compliant. Do NOT include any markdown 
 The ART Score must be psychometrically rigorous. It should reflect real, observable improvement in thinking quality, not length, formatting, or superficial polish. Marginal or cosmetic improvements must receive low-to-moderate scores.
 Scoring must be domain-sensitive and follow explicit criteria.
 You must always follow the structured reasoning process defined below before giving any score.`;
+
+// Executor: one pinned model at one fixed temperature, used for every run that
+// must be comparable to another (baseline execution, self-revision, and the
+// human-steered execution). Pinning this means the only difference between
+// runs is the prompt, never sampling variance.
+export const EXECUTOR_MODEL = "gemini-3.5-flash";
+export const EXECUTOR_TEMPERATURE = 0;
