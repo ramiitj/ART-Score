@@ -8,7 +8,20 @@ import "firebase/compat/firestore";
 import dotenv from "dotenv";
 
 import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, FAILURE_MODES, FALLBACK_TASKS, FAILURE_MODE_IDS } from "./asset-data";
-import { MASTER_SYSTEM_PROMPT, maskName, aggregatePasses, computeFinalEvaluation, EXECUTOR_MODEL, EXECUTOR_TEMPERATURE, buildSelfRevisePrompt } from "./server/headroom";
+import {
+  MASTER_SYSTEM_PROMPT,
+  maskName,
+  aggregatePasses,
+  computeFinalEvaluation,
+  EXECUTOR_MODEL,
+  EXECUTOR_TEMPERATURE,
+  buildSelfRevisePrompt,
+  generateGapManifest,
+  judgePairedComparison,
+  judgeManifestResolution,
+  computeHeadroomShadow
+} from "./server/headroom";
+import type { GapItem, HeadroomShadowResult } from "./server/headroom";
 
 dotenv.config();
 
@@ -640,6 +653,14 @@ Elements Included: [Brief description of the domain-specific elements included]
       console.warn("[Self-Revision Shadow] Failed to compute self-revised ceiling for session; continuing without it.", err);
     }
 
+    // Headroom migration Phase 2 (shadow mode): generate the hidden gap
+    // manifest — the a-priori criterion Judge v2 checks resolution against.
+    // Skipped for the static fallback (no model call available there).
+    // Never sent to the client (see docs/HEADROOM_MIGRATION_SPEC.md §6).
+    const gapManifest: GapItem[] = usedModel !== "static-fallback"
+      ? (await generateGapManifest(ai, usedModel, activePrompt, selectedTask, selectedBaseline, domain)) || []
+      : [];
+
     // Create a new secure server-side session record
     const sessionId = crypto.randomUUID();
     const sessionRecord = {
@@ -662,6 +683,7 @@ Elements Included: [Brief description of the domain-specific elements included]
       selfRevisedOutput, // Headroom migration Phase 1 (shadow): self-revised ceiling, never sent to client
       selfRevisedQualityScore,
       selfRevisedSpread,
+      gapManifest, // Headroom migration Phase 2 (shadow): hidden gap manifest, never sent to client
       rubricVersionId: activeRubricVersionId, // Store current rubric version ID (FIX 9.1 & 11.11)
       systemPrompt: activePrompt, // Keep versioned system prompt on the session (FIX 9.1 & 11.11)
       createdAt: new Date().toISOString(),
@@ -971,6 +993,25 @@ Generate the final expanded output. Output only the final result with zero meta-
       false
     );
 
+    // Headroom migration Phase 2 (shadow mode): run the blind paired-comparison
+    // and manifest-resolution Judge v2 alongside the legacy scorer above. This
+    // is purely additive — logged on the attempt for later distribution
+    // comparison, never surfaced to the user or used in finalEvaluation.
+    let headroomShadow: HeadroomShadowResult | null = null;
+    if (sessionData.selfRevisedOutput && Array.isArray(sessionData.gapManifest) && sessionData.gapManifest.length > 0) {
+      try {
+        const [pairedResult, manifestResult] = await Promise.all([
+          judgePairedComparison(ai, sessionData.task, sessionData.selfRevisedOutput, improvedOutput),
+          judgeManifestResolution(ai, sessionData.task, sessionData.gapManifest, sessionData.selfRevisedOutput, improvedOutput)
+        ]);
+        if (pairedResult && manifestResult) {
+          headroomShadow = computeHeadroomShadow(pairedResult, manifestResult);
+        }
+      } catch (err) {
+        console.warn(`[Headroom Shadow] Failed to compute Judge v2 shadow score for session ${sessionId}; continuing with legacy score only.`, err);
+      }
+    }
+
     const attemptRecord = {
       sessionId,
       domain: sessionData.domain,
@@ -988,7 +1029,8 @@ Generate the final expanded output. Output only the final result with zero meta-
       revisionWordCount: finalEvaluation.textTelemetry.revisionWordCount,
       finalSpread: scoreResult.spread,
       baselineSpread: sessionData.baselineSpread || 0,
-      guardrail: finalEvaluation.triageFlags.guardrailFired ? finalEvaluation.triageFlags.reason : "none"
+      guardrail: finalEvaluation.triageFlags.guardrailFired ? finalEvaluation.triageFlags.reason : "none",
+      headroomShadow // Headroom migration Phase 2: new-architecture score, logged for comparison only
     };
 
     if (db !== null) {

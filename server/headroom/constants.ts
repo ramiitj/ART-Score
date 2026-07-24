@@ -14,3 +14,19 @@ You must always follow the structured reasoning process defined below before giv
 // runs is the prompt, never sampling variance.
 export const EXECUTOR_MODEL = "gemini-3.5-flash";
 export const EXECUTOR_TEMPERATURE = 0;
+
+// Judge: one pinned model at temperature 0, applied identically regardless of
+// which side of a blind comparison it is scoring. Its biases (position,
+// verbosity, self-preference) are neutralized structurally via blinding and
+// randomization, not by instruction.
+export const JUDGE_MODEL = "gemini-3.1-pro-preview";
+export const JUDGE_TEMPERATURE = 0;
+
+// Independent judge passes per comparison; position is randomized
+// independently on each pass so no consistent order or identity signal survives.
+export const JUDGE_PASS_COUNT = 3;
+
+// The steered output must win at least this fraction of blind paired-comparison
+// passes for Headroom to be non-zero. Below this, there is no reliable
+// elevation beyond the model's own self-revision to measure.
+export const VALIDITY_GATE_THRESHOLD = 2 / 3;
