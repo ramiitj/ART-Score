@@ -9,7 +9,12 @@ export function computeFinalEvaluation(
   improvedOutput: string,
   revision: string,
   timeTakenServerSeconds: number,
-  injectionDetected: boolean
+  // Regex-based injection scan result. Advisory only (see the C1 guardrail
+  // below, which is the signal that actually zeroes the score) -- this still
+  // excludes the attempt from `comparable` below, since a regex hit is
+  // suspicious enough to distrust as a clean data point even when the model
+  // itself does not confirm an integrity violation.
+  regexInjectionSuspected: boolean
 ) {
   const p1 = scoreResult.passes[0];
   const p2 = scoreResult.passes[1];
@@ -47,10 +52,22 @@ export function computeFinalEvaluation(
     finalScore = 0;
   }
 
-  // Post-Processing Guards / Caps (C2-C5)
+  // Post-Processing Guards / Caps (C1-C5)
   let guardrailFired = false;
   let capApplied = 0;
   let guardrailReason = "";
+
+  // C1: Integrity Violation Guardrail -- model-authoritative. The judge sees
+  // the edited prompt in context and is instructed to set this when it
+  // contains content addressed to the evaluator or an attempt to override
+  // the rubric. This, not the regex scan, is what actually zeroes the score
+  // (migration spec Phase 5: regex is downgraded to advisory).
+  if (rulingPass.integrityViolation === true) {
+    finalScore = 0;
+    guardrailFired = true;
+    capApplied = 0;
+    guardrailReason = "Integrity Violation: The judge detected content addressed to the evaluator or an attempt to override the rubric.";
+  }
 
   const countMarkdown = (str: string) => (str.match(/#|\*|- |\d+\. /g) || []).length;
   const countWords = (str: string) => str.trim().split(/\s+/).length;
@@ -114,7 +131,8 @@ export function computeFinalEvaluation(
     sessionData.generationModelUsed === "static-fallback" ||
     sessionData.baselineBandWide === true ||
     judgeUnstable === true ||
-    injectionDetected === true ||
+    regexInjectionSuspected === true ||
+    rulingPass.integrityViolation === true ||
     timeExceeded === true ||
     sessionData.generationModelUsed !== "gemini-3.1-flash-lite"
   );
@@ -130,6 +148,7 @@ export function computeFinalEvaluation(
     diffInventory: diffInventory.map((d: any) => `${d.classification}: ${d.changeDescription}`).join("\n"),
     selfChecks: rulingPass.selfChecks,
     confidence: rulingPass.confidence,
+    integrityViolation: rulingPass.integrityViolation,
     dimensionScores,
     judgeMetadata: {
       modelVersion: "gemini-3.1-pro-preview",

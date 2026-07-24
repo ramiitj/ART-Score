@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import crypto from "crypto";
+import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import firebase from "firebase/compat/app";
@@ -23,6 +24,14 @@ import {
   computePercentile
 } from "./server/headroom";
 import type { GapItem, HeadroomShadowResult } from "./server/headroom";
+import {
+  parseAdminKeys,
+  isValidAdminKey,
+  fingerprintAdminKey,
+  checkAndIncrementCap,
+  DEFAULT_DAILY_GENERATION_CAP
+} from "./server/security";
+import type { DailyCapState } from "./server/security";
 
 dotenv.config();
 
@@ -35,9 +44,38 @@ app.use(express.json());
 let localSessions: any[] = [];
 let localAttempts: any[] = [];
 let localRubricVersions: any[] = [];
+let localAdminAuditLog: any[] = [];
 
-// Admin authentication key: strictly from env
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
+// Admin authentication keys: comma-separated ADMIN_KEYS (preferred, supports
+// rotation -- add a new key, migrate callers, then drop the old one with no
+// downtime) or legacy singular ADMIN_KEY, both strictly from env.
+const ADMIN_KEYS = parseAdminKeys(process.env.ADMIN_KEYS || process.env.ADMIN_KEY);
+
+// Per-process daily cap on new session generation (Headroom migration Phase
+// 5): protects against cost blowouts from abuse or retry storms. Resets on
+// process restart -- see server/security/spendCap.ts for why that's the
+// right tradeoff for a single-instance deployment.
+const DAILY_GENERATION_CAP = process.env.DAILY_GENERATION_CAP
+  ? Number(process.env.DAILY_GENERATION_CAP)
+  : DEFAULT_DAILY_GENERATION_CAP;
+let dailyCapState: DailyCapState = { date: "", count: 0 };
+
+// Rate limiting on the two Gemini-backed, expensive endpoints (Phase 5).
+const generateTaskLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many task generation requests from this address. Please wait and try again." }
+});
+
+const evaluateRevisionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many evaluation requests from this address. Please wait and try again." }
+});
 
 // Lazy-loaded firebase initialization
 let firestoreDb: any = null;
@@ -118,14 +156,40 @@ async function robustGenerateContent(ai: GoogleGenAI, requestParams: any): Promi
 
 // Admin Authentication Middleware
 function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  if (!process.env.ADMIN_KEY) {
+  if (ADMIN_KEYS.length === 0) {
     return res.status(503).json({ error: "Admin access not configured." });
   }
-  const key = req.headers["x-admin-key"];
-  if (!key || key !== process.env.ADMIN_KEY) {
+  const rawKey = req.headers["x-admin-key"];
+  const providedKey = Array.isArray(rawKey) ? rawKey[0] : rawKey;
+  if (!isValidAdminKey(providedKey, ADMIN_KEYS)) {
     return res.status(401).json({ error: "Unauthorized access: invalid or missing admin key." });
   }
+  (req as any).adminKeyFingerprint = fingerprintAdminKey(providedKey!);
   next();
+}
+
+// Records an admin action to a persistent audit log -- never the raw key,
+// only its fingerprint -- so access to rubric changes and PII exports is
+// attributable after the fact (Headroom migration Phase 5).
+async function recordAdminAudit(action: string, req: express.Request) {
+  const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+  const entry = {
+    action,
+    timestamp: new Date().toISOString(),
+    keyFingerprint: (req as any).adminKeyFingerprint || "unknown",
+    ip: String(rawIp).split(",")[0].trim()
+  };
+
+  const db = getFirestoreDb();
+  if (db !== null) {
+    try {
+      await db.collection("adminAuditLog").add(entry);
+      return;
+    } catch (err) {
+      console.error("❌ Failed to write admin audit log entry to Firestore:", err);
+    }
+  }
+  localAdminAuditLog.unshift(entry);
 }
 
 let activeRubricVersionId = "v1.0.0";
@@ -424,15 +488,21 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     activeRubricVersion: activeRubricVersionId,
-    adminAuthStatus: ADMIN_KEY ? "active" : "inactive"
+    adminAuthStatus: ADMIN_KEYS.length > 0 ? "active" : "inactive"
   });
 });
 
 // 2. Task generation endpoint (with pre-scoring & 40-60 quality band loop)
-app.post("/api/generate-task", async (req, res) => {
+app.post("/api/generate-task", generateTaskLimiter, async (req, res) => {
   const { domain, difficulty } = req.body;
   if (!domain || !difficulty) {
     return res.status(400).json({ error: "Missing required params: domain, difficulty" });
+  }
+
+  const capCheck = checkAndIncrementCap(dailyCapState, DAILY_GENERATION_CAP, new Date().toISOString());
+  dailyCapState = capCheck.state;
+  if (!capCheck.allowed) {
+    return res.status(503).json({ error: "Daily task generation capacity reached. Please try again tomorrow." });
   }
 
   const diffDef = DIFFICULTY_DEFINITIONS[difficulty as keyof typeof DIFFICULTY_DEFINITIONS] || DIFFICULTY_DEFINITIONS["Intermediate"];
@@ -690,7 +760,7 @@ Elements Included: [Brief description of the domain-specific elements included]
 });
 
 // 3. Evaluation endpoint (Highly secure scoring pipeline)
-app.post("/api/evaluate-revision", async (req, res) => {
+app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => {
   const { sessionId, editedPrompt } = req.body;
 
   if (!sessionId || !editedPrompt) {
@@ -728,8 +798,15 @@ app.post("/api/evaluate-revision", async (req, res) => {
       await db.collection("sessions").doc(sessionId).update({ status: "completed" });
     }
 
-    // 2. Perform Injection Check AFTER lookup (FIX 5.1)
-    const injectionDetected = INJECTION_REGEXES.some(regex => regex.test(editedPrompt));
+    // 2. Perform Injection Check AFTER lookup (FIX 5.1). Advisory only (Phase
+    // 5): a regex hit no longer skips scoring or forces a zero by itself --
+    // the model's own integrityViolation signal (checked inside
+    // computeFinalEvaluation) is the authoritative gate. This still excludes
+    // the attempt from `comparable`.
+    const regexInjectionSuspected = INJECTION_REGEXES.some(regex => regex.test(editedPrompt));
+    if (regexInjectionSuspected) {
+      console.warn(`[Evaluation Pipeline] Regex injection scan flagged session ${sessionId} (advisory) — proceeding to score normally.`);
+    }
 
     // Calculate server-side timing (FIX 6.2 & 11.3)
     const timeTakenServerSeconds = Math.floor((Date.now() - new Date(sessionData.createdAt).getTime()) / 1000);
@@ -739,7 +816,7 @@ app.post("/api/evaluate-revision", async (req, res) => {
     const isIdenticalToTask = cleanText(editedPrompt) === cleanText(sessionData.task);
 
     // Guardrail rejection: Blank, Identical to Baseline Prompt, or Identical to Task
-    if (!injectionDetected && (isBlank || isIdenticalToBaselinePrompt || isIdenticalToTask)) {
+    if (!regexInjectionSuspected && (isBlank || isIdenticalToBaselinePrompt || isIdenticalToTask)) {
       const emptyResult = {
         score: 0,
         strengths: [
@@ -805,73 +882,10 @@ app.post("/api/evaluate-revision", async (req, res) => {
     });
     improvedOutput = execRes.text || "Execution finished.";
 
-    // Step 2: Handle scoring/grading
-    if (injectionDetected) {
-      // FIX 5.2: Proceed to generate execution output (done above), but skip parallel judge, score 0, integrityViolation: true
-      console.warn(`[Evaluation Pipeline] Injection attempt flagged for session ${sessionId}. Skipping scoring passes.`);
-      
-      const promptHash = crypto.createHash("sha256").update(sessionData.systemPrompt || MASTER_SYSTEM_PROMPT).digest("hex");
-      const injectionResult = {
-        score: 0,
-        strengths: [
-          "Clarity & Precision: 0/20",
-          "Depth of Analysis & Insight: 0/20",
-          "Structure & Logical Flow: 0/20",
-          "Actionability & Practical Value: 0/20",
-          "Domain-Specific Excellence: 0/20"
-        ],
-        insight: "Evaluation Rejected: An administration command pattern or system override request was detected within the untrusted edited prompt. The prompt-injection guardrail was successfully triggered. Score set to 0.",
-        clarity: improvedOutput,
-        dimensionScores: [
-          { dimension: "Clarity & Precision", score: 0, rationale: "Security command override detected" },
-          { dimension: "Depth of Analysis & Insight", score: 0, rationale: "Security command override detected" },
-          { dimension: "Structure & Logical Flow", score: 0, rationale: "Security command override detected" },
-          { dimension: "Actionability & Practical Value", score: 0, rationale: "Security command override detected" },
-          { dimension: "Domain-Specific Excellence", score: 0, rationale: "Security command override detected" }
-        ],
-        judgeMetadata: {
-          modelVersion: "gemini-3.1-pro-preview",
-          promptHash,
-          temperature: 0,
-          rubricVersionId: sessionData.rubricVersionId,
-          integrityViolation: true
-        },
-        triageFlags: { guardrailFired: true, reason: "Security Check Triggered: Command injection detected.", capApplied: 0 },
-        textTelemetry: {
-          baselineLength: sessionData.baseline.length,
-          revisionLength: editedPrompt.length,
-          revisionWordCount: countWords(editedPrompt)
-        }
-      };
-
-      const injectionAttempt = {
-        sessionId,
-        domain: sessionData.domain,
-        difficulty: sessionData.difficulty,
-        task: sessionData.task,
-        baseline: sessionData.baseline,
-        editedPrompt,
-        score: 0,
-        evaluation: injectionResult,
-        timestamp: new Date().toISOString(),
-        rubricVersionId: sessionData.rubricVersionId,
-        comparable: false,
-        status: "completed",
-        timeTakenServerSeconds,
-        revisionWordCount: countWords(editedPrompt),
-        guardrail: "INJECTION_DETECTED"
-      };
-
-      if (db !== null) {
-        await db.collection("attempts").doc(sessionId).set(injectionAttempt);
-      } else {
-        localAttempts.unshift({ id: sessionId, ...injectionAttempt });
-      }
-
-      return res.json(injectionResult);
-    }
-
-    // Step 3: Run the 3-pass scoring (FIX 4, 8)
+    // Step 2: Run the 3-pass scoring (FIX 4, 8). The regex injection scan
+    // above is advisory (Phase 5) and no longer skips this -- the model sees
+    // the edited prompt in context and sets integrityViolation itself, which
+    // computeFinalEvaluation's C1 guardrail below treats as authoritative.
     const rubricPrompt = await getRubricPromptForSession(sessionData); // FIX 9
     const scoreResult = await scoreOutputThreePass(
       ai,
@@ -952,7 +966,7 @@ app.post("/api/evaluate-revision", async (req, res) => {
       improvedOutput,
       editedPrompt,
       timeTakenServerSeconds,
-      false
+      regexInjectionSuspected
     );
 
     // Headroom migration Phase 2 (shadow mode): run the blind paired-comparison
@@ -992,6 +1006,7 @@ app.post("/api/evaluate-revision", async (req, res) => {
       finalSpread: scoreResult.spread,
       baselineSpread: sessionData.baselineSpread || 0,
       guardrail: finalEvaluation.triageFlags.guardrailFired ? finalEvaluation.triageFlags.reason : "none",
+      regexInjectionSuspected, // Headroom migration Phase 5: advisory signal, kept for audit even when it didn't zero the score
       headroomShadow // Headroom migration Phase 2: new-architecture score, logged for comparison only
     };
 
@@ -1129,10 +1144,10 @@ app.post("/api/save-attempt", async (req, res) => {
   const finalSpread = existingAttempt?.finalSpread || 0;
   const judgeUnstable = (baselineSpread > 4) || (finalSpread > 4);
 
-  const injectionDetected =
-    existingAttempt?.guardrail === "INJECTION_DETECTED" ||
-    existingAttempt?.evaluation?.integrityViolation === true ||
-    false;
+  // Phase 5: the regex scan alone no longer sets a distinct guardrail string
+  // (it's advisory) -- the model-confirmed integrityViolation is the
+  // authoritative signal here.
+  const injectionDetected = existingAttempt?.evaluation?.integrityViolation === true;
 
   const generationModelUsed = sessionData?.generationModelUsed || "gemini-3.5-flash";
   const baselineBandWide = sessionData?.baselineBandWide === true;
@@ -1237,11 +1252,13 @@ app.post("/api/system-prompt", requireAdminAuth, async (req, res) => {
     });
   }
 
+  await recordAdminAudit(`system-prompt:update:${nextVersionId}`, req);
   res.json({ success: true, message: `Rubric versioned successfully as ${nextVersionId}.`, systemPrompt });
 });
 
 // Admin Route: Fetch Master System Prompt
 app.get("/api/system-prompt", requireAdminAuth, async (req, res) => {
+  await recordAdminAudit("system-prompt:read", req);
   res.json({ systemPrompt: cachedSystemPrompt, activeRubricVersionId });
 });
 
@@ -1302,6 +1319,7 @@ app.get("/api/attempt/:id", async (req, res) => {
 
 // Admin Endpoint: secure download master dataset (Admin secured)
 app.get("/api/admin/attempts", requireAdminAuth, async (req, res) => {
+  await recordAdminAudit("admin-attempts:export", req);
   const db = getFirestoreDb();
   if (db !== null) {
     try {
@@ -1317,6 +1335,24 @@ app.get("/api/admin/attempts", requireAdminAuth, async (req, res) => {
     }
   }
   res.json(localAttempts);
+});
+
+// Admin Endpoint: view the admin action audit log (who did what, when --
+// never the raw key, only its fingerprint). Headroom migration Phase 5.
+app.get("/api/admin/audit-log", requireAdminAuth, async (req, res) => {
+  await recordAdminAudit("audit-log:read", req);
+  const db = getFirestoreDb();
+  if (db !== null) {
+    try {
+      const snapshot = await db.collection("adminAuditLog").orderBy("timestamp", "desc").limit(200).get();
+      const list: any[] = [];
+      snapshot.forEach((doc: any) => list.push({ id: doc.id, ...doc.data() }));
+      return res.json(list);
+    } catch (e: any) {
+      console.error("❌ Admin audit log retrieval error, fallback to memory:", e);
+    }
+  }
+  res.json(localAdminAuditLog.slice(0, 200));
 });
 
 // 5. Leaderboard Endpoint (PII Scrubbed public route - FIX 1.3 & FIX 6.6)
@@ -1550,7 +1586,7 @@ async function processPendingScores() {
           textToEvaluate,
           attempt.editedPrompt,
           timeTakenServerSeconds,
-          attempt.injectionDetected || false
+          attempt.regexInjectionSuspected || false
         );
 
         const updateObj = {

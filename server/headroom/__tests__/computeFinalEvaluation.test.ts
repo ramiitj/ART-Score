@@ -67,6 +67,42 @@ describe("computeFinalEvaluation — normal path", () => {
   });
 });
 
+describe("computeFinalEvaluation — C1 Integrity Violation guardrail", () => {
+  it("zeroes the score when the ruling pass confirms an integrity violation, overriding an otherwise high score", () => {
+    // 5 dims x 20 = 100 -> pre-guardrail finalScore would be 100.
+    const maxPass = makePass({
+      clarityScore: 20, depthScore: 20, structureScore: 20, actionabilityScore: 20, domainScore: 20,
+      integrityViolation: true
+    });
+    const scoreResult = aggregatePasses([maxPass, maxPass, maxPass])!;
+    const session = baseSession();
+
+    const result = computeFinalEvaluation(session, scoreResult, "improved output", PLAIN_REVISION, 30, false);
+
+    expect(result.score).toBe(0);
+    expect(result.triageFlags.guardrailFired).toBe(true);
+    expect(result.triageFlags.capApplied).toBe(0);
+    expect(result.triageFlags.reason).toMatch(/Integrity Violation/);
+    expect(result.integrityViolation).toBe(true);
+    expect(result.comparable).toBe(false);
+  });
+
+  it("does not fire when the regex scan alone is suspicious but the model does not confirm it", () => {
+    // regexInjectionSuspected=true (6th arg) but integrityViolation stays false on every pass:
+    // the score itself must not be zeroed, only comparable is affected (regex stays advisory).
+    const passes = [makePass(), makePass(), makePass()]; // total 70 -> pre-cap finalScore 40
+    const scoreResult = aggregatePasses(passes)!;
+    const session = baseSession();
+
+    const result = computeFinalEvaluation(session, scoreResult, "improved output", PLAIN_REVISION, 30, true);
+
+    expect(result.score).toBe(40);
+    expect(result.triageFlags.guardrailFired).toBe(false);
+    expect(result.integrityViolation).toBe(false);
+    expect(result.comparable).toBe(false); // still excluded from comparable, just not zeroed
+  });
+});
+
 describe("computeFinalEvaluation — C2 Formatting Fallacy guardrail", () => {
   it("caps to 25 when markdown is added without word-count growth, on an otherwise high score", () => {
     const passes = [makePass(), makePass(), makePass()]; // total 70 -> pre-cap finalScore 40
@@ -210,10 +246,22 @@ describe("computeFinalEvaluation — comparable flag", () => {
     expect(result.comparable).toBe(false);
   });
 
-  it("is false when an injection was detected", () => {
+  it("is false when the regex injection scan is suspicious", () => {
     const scoreResult = aggregatePasses(passes)!;
     const session = baseSession();
     const result = computeFinalEvaluation(session, scoreResult, "out", PLAIN_REVISION, 30, true);
+    expect(result.comparable).toBe(false);
+  });
+
+  it("is false when the model confirms an integrity violation", () => {
+    const violationPasses = [
+      makePass({ integrityViolation: true }),
+      makePass({ integrityViolation: true }),
+      makePass({ integrityViolation: true })
+    ];
+    const scoreResult = aggregatePasses(violationPasses)!;
+    const session = baseSession();
+    const result = computeFinalEvaluation(session, scoreResult, "out", PLAIN_REVISION, 30, false);
     expect(result.comparable).toBe(false);
   });
 
