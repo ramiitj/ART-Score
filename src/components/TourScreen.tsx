@@ -10,6 +10,7 @@ interface TourProps {
   domain: string;
   difficulty: string;
   timeLimitSeconds: number;
+  itemsTotal: number;
   onBeginTest: () => void;
 }
 
@@ -25,6 +26,7 @@ export default function TourScreen({
   domain,
   difficulty,
   timeLimitSeconds,
+  itemsTotal,
   onBeginTest,
 }: TourProps) {
   // We've got 5 key elements matching the actual layout structure
@@ -32,34 +34,22 @@ export default function TourScreen({
 
   const stepsData: TourStepData[] = [
     {
-      title: "1. Sandbox Header Console",
-      shortDesc: "Displays session details and identity credentials securely.",
-      guidance: "This header anchors your active session. It maintains focus on your profile and selected domain without constant timer distractions, keeping your cognitive focus entirely on the evaluation.",
-      badge: "Session Identification",
+      title: "1. Read the task and the AI's answer",
+      shortDesc: "A realistic work scenario, and what the AI made of it.",
+      guidance: "On the left you'll see the task, and underneath it the answer the AI produced from a first-attempt prompt. That answer is decent but not excellent — your job is to spot what's missing from it.",
+      badge: "The starting point",
     },
     {
-      title: "2. Task Directions & Scenario",
-      shortDesc: "The core challenge instruction depicting the task.",
-      guidance: "Located at the top of your test booklet. This reads the real-world scenario you're working within — read it carefully, since it frames what a strong prompt edit needs to account for.",
-      badge: "Assessor Input Scenario",
+      title: "2. Improve the prompt",
+      shortDesc: "Edit the prompt itself, not the AI's answer.",
+      guidance: "On the right is the prompt that produced that answer, ready to edit. Add the specifics it left out — the audience, the constraints, the things a professional would have asked for. When you submit, the AI runs your version and we compare the results. Please type your edits; pasting is turned off on that box.",
+      badge: "Your move",
     },
     {
-      title: "3. Standard AI Baseline Response",
-      shortDesc: "The AI's response to the current, unedited prompt.",
-      guidance: "This block is wrapped in an amber border. It shows what the AI produces right now, before your edit. Analyze its quality gaps, missing specifics, and weak structure — that's what your prompt edit needs to close.",
-      badge: "Flawed Reference Draft",
-    },
-    {
-      title: "4. Edit the Baseline Prompt",
-      shortDesc: "Directly edit the prompt that produced the baseline.",
-      guidance: "A secure, fullscreen editor pre-filled with the original baseline prompt. Edit it directly — the AI re-runs your edited prompt to produce your final output. To protect the psychometric integrity of the session, standard right-click actions, pasting, copy actions, and screenshot key triggers are securely blocked.",
-      badge: "Active Interactive Editor",
-    },
-    {
-      title: "5. Submission Control Desk",
-      shortDesc: "Transmits your cognitive reflection for dynamic scoring.",
-      guidance: "Located at the bottom right. Once satisfied, click to submit. Your submission is evaluated against 5 target focus categories including clarity, depth, domain-specific terminology, and alignment rules.",
-      badge: "One-Shot Authentication",
+      title: "3. Submit before the timer ends",
+      shortDesc: "One submission per task.",
+      guidance: "You get one submission per task. If the timer runs out, whatever is in the box is submitted automatically — so put something in it early and refine from there.",
+      badge: "Finishing up",
     }
   ];
 
@@ -78,18 +68,18 @@ export default function TourScreen({
   };
 
   return (
-    <div className="max-w-6xl mx-auto py-1.5 px-4 h-full flex flex-col justify-between overflow-hidden select-none font-sans">
+    <div className="max-w-6xl mx-auto py-1.5 px-4 h-full flex flex-col justify-between overflow-hidden font-sans">
       
       {/* Dynamic Header Block */}
       <div className="text-center mb-2 flex-shrink-0">
         <span className="inline-block text-[10px] md:text-xs font-mono font-bold uppercase py-0.5 px-2.5 rounded bg-amber-500/10 text-amber-700 tracking-wider">
-          Step 3: Interactive Interface Tour
+          Step 3 of 3
         </span>
         <h2 className="text-lg md:text-xl font-extrabold text-neutral-800 mt-1 tracking-tight">
-          Verify Test Sandbox Layout Elements
+          How this works
         </h2>
         <p className="text-xs text-neutral-600 mt-0.5 max-w-lg mx-auto font-medium">
-          Step through each layout block below to understand the workspace before you begin.
+          A quick look at the screen before you start.
         </p>
       </div>
 
@@ -102,7 +92,7 @@ export default function TourScreen({
             <div className="flex items-center justify-between mb-3 border-b border-neutral-800 pb-2.5">
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                Feature Guidance
+                How it works
               </span>
               <span className="text-[10px] bg-neutral-800 px-2 py-0.5 rounded text-neutral-300 font-bold font-mono">
                 {activeStep + 1} / {stepsData.length}
@@ -168,7 +158,7 @@ export default function TourScreen({
               onClick={handleNext}
               className="px-4 py-1.5 text-xs font-black text-neutral-900 bg-amber-500 hover:bg-amber-600 rounded transition-all flex items-center gap-1 cursor-pointer hover:shadow-md"
             >
-              {activeStep === stepsData.length - 1 ? "Start Test" : "Next"}
+              {activeStep === stepsData.length - 1 ? "Start" : "Next"}
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -179,7 +169,7 @@ export default function TourScreen({
           <div className="flex items-center justify-between px-1 flex-shrink-0">
             <span className="text-[10px] font-mono font-black text-neutral-450 uppercase tracking-widest flex items-center gap-1.5">
               <Layout className="w-3.5 h-3.5" />
-              High-Fidelity Test Blueprint Mockup
+              Preview of the screen
             </span>
             <span className="text-[10px] text-neutral-500 italic font-semibold">
               * Click any element block below to highlight instructions
@@ -357,13 +347,16 @@ export default function TourScreen({
       <div className="flex justify-center flex-shrink-0 bg-neutral-100 border border-neutral-200/80 p-3 rounded-xl gap-4 items-center flex-col sm:flex-row shadow-inner">
         <div className="flex items-center gap-2 text-xs font-semibold text-neutral-600">
           <Clock className="w-4.5 h-4.5 text-amber-600" />
-          <span>Allotted Test Time: <strong className="text-amber-700 font-black">{timeLimitSeconds} SECONDS</strong></span>
+          <span>
+            <strong className="text-amber-700 font-black">{itemsTotal} tasks</strong>, {timeLimitSeconds} seconds each
+            <span className="text-neutral-400 font-medium"> · about {Math.ceil((itemsTotal * (timeLimitSeconds + 45)) / 60)} min total</span>
+          </span>
         </div>
         <button
           onClick={onBeginTest}
           className="group inline-flex items-center gap-2 bg-neutral-900 text-white hover:bg-neutral-950 px-6 py-2.5 rounded text-xs font-black uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
         >
-          Confirm Protocols & Start Live Test
+          Start task 1
           <ArrowRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
         </button>
       </div>

@@ -9,23 +9,23 @@ export default function WelcomeScreen({ onStart }: WelcomeProps) {
   const steps = [
     {
       icon: <PenTool className="w-4 h-4 text-amber-500" />,
-      title: "1. One-Shot Intervention",
-      desc: "The AI sets the baseline. You match your wits against a dynamic timer to inject crucial context, logic, and professional-grade directions to provide the human value-add."
+      title: "1. Three tasks, one sitting",
+      desc: "You'll work through three realistic scenarios from your field, each on a timer. Expect about 10 minutes in total."
     },
     {
       icon: <BarChart3 className="w-4 h-4 text-amber-500" />,
-      title: "2. Standardized Diagnostics",
-      desc: "Automated scoring measures revisions across five key dimensions: Clarity & Precision, Depth of Insight, Structure, Actionability, and Domain Value."
+      title: "2. Improve the prompt, not the answer",
+      desc: "You see a task, a first-attempt prompt, and what the AI wrote from it. You edit the prompt — then the AI re-runs your version."
     },
     {
       icon: <Briefcase className="w-4 h-4 text-amber-500" />,
-      title: "3. Domain-Specific Rigor",
-      desc: "Our evaluation framework adapts to your chosen specialist domain—be it Engineering, Product Management, Strategy, Law, HR, or Finance."
+      title: "3. Judged against the AI's own best try",
+      desc: "The AI also revises its own answer, unaided. Your version is compared against that, blind, so you're credited only for going beyond what it reaches alone."
     },
     {
       icon: <Trophy className="w-4 h-4 text-amber-500" />,
-      title: "4. Cognitive Benchmarking",
-      desc: "Track your 'Human Value-Add' index on our live database, compare against global peers, and share your verified scorecard to LinkedIn or X."
+      title: "4. See where you stand",
+      desc: "Get a score per task with how you compare to others in the same field and difficulty, plus a link you can share."
     }
   ];
 
@@ -54,7 +54,7 @@ export default function WelcomeScreen({ onStart }: WelcomeProps) {
         transition={{ duration: 0.3 }}
       >
         <p className="text-xs md:text-sm text-neutral-650 leading-relaxed font-normal">
-          In today’s world, simple AI generation is just the starting point. The true talent differentiator is your <strong>Human Value-Add</strong>—your ability to audit, elevate, and inject critical thinking into raw AI drafts. While the AI sets the baseline, you provide the defining professional edge.
+          AI will give you a competent first draft on almost anything. What it won't do is know what your situation actually requires. This test measures your <strong>headroom</strong> — how much better the result gets when you bring what the AI was missing, measured against the AI's own best unaided attempt.
         </p>
       </motion.div>
 

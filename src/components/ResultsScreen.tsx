@@ -255,11 +255,14 @@ Verify my score and take the test: ${verifyLink}
   };
 
   // Score categorization and styles
+  // Descriptive, not judgemental. A 0 means the edit didn't measurably beat
+  // what the AI reaches on its own -- that is a result, not a verdict on the
+  // person, and the old "Baseline Failure - AI Output Prevails" read as one.
   const getScoreRating = (score: number) => {
-    if (score >= 80) return { category: "Elite Human Contributor Only", color: "text-emerald-600 border-emerald-500 bg-emerald-50/20", badge: "bg-emerald-500 text-white" };
-    if (score >= 40) return { category: "Standard Human Premium", color: "text-amber-600 border-amber-500 bg-amber-50/20", badge: "bg-amber-500 text-neutral-900" };
-    if (score > 0) return { category: "Nominal Human Addition", color: "text-zinc-650 border-zinc-400 bg-zinc-50/20", badge: "bg-zinc-500 text-white" };
-    return { category: "Baseline Failure - AI Output Prevails", color: "text-rose-600 border-rose-500 bg-rose-50/20", badge: "bg-rose-500 text-white" };
+    if (score >= 80) return { category: "Substantial improvement", color: "text-emerald-600 border-emerald-500 bg-emerald-50/20", badge: "bg-emerald-500 text-white" };
+    if (score >= 40) return { category: "Clear improvement", color: "text-amber-600 border-amber-500 bg-amber-50/20", badge: "bg-amber-500 text-neutral-900" };
+    if (score > 0) return { category: "Modest improvement", color: "text-zinc-650 border-zinc-400 bg-zinc-50/20", badge: "bg-zinc-500 text-white" };
+    return { category: "No measurable improvement this time", color: "text-neutral-600 border-neutral-400 bg-neutral-50/40", badge: "bg-neutral-500 text-white" };
   };
 
   const rating = getScoreRating(evaluation.score);
@@ -323,7 +326,7 @@ Verify my score and take the test: ${verifyLink}
             className={`flex flex-col items-center justify-center p-6 rounded-2xl border ${rating.color} shadow-sm text-center`}
           >
             <span className="text-[10px] font-mono font-bold tracking-widest text-neutral-500 uppercase mb-3">
-              Human Value Add
+              Your headroom score
             </span>
             
             <div className="relative flex items-center justify-center w-32 h-32 rounded-full border-2 border-dashed border-current mb-4">
@@ -335,11 +338,11 @@ Verify my score and take the test: ${verifyLink}
             {(evaluation.baselineQualityScore !== undefined && evaluation.baselineQualityScore > 0) && (
               <div className="flex w-full items-center justify-between text-[11px] font-mono font-bold text-neutral-600 mb-3 px-2 border-t border-b border-black/5 py-2 bg-black/5">
                 <div className="flex flex-col items-start gap-0.5">
-                  <span className="opacity-70 text-[9px] uppercase">Base (AI)</span>
+                  <span className="opacity-70 text-[9px] uppercase">AI alone</span>
                   <span className="text-neutral-900">{evaluation.baselineQualityScore}/100</span>
                 </div>
                 <div className="flex flex-col items-end gap-0.5">
-                  <span className="opacity-70 text-[9px] uppercase">Revised Output</span>
+                  <span className="opacity-70 text-[9px] uppercase">With your edit</span>
                   <span className="text-neutral-900">{(evaluation.baselineQualityScore + (evaluation.rawDeltaScore || 0))}/100</span>
                 </div>
               </div>
@@ -347,14 +350,14 @@ Verify my score and take the test: ${verifyLink}
 
             <div className="mt-1 flex flex-col items-center w-full">
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-400 mb-1 select-none">
-                Final Judgment
+                What this means
               </span>
               <span className={`px-3 py-1.5 text-xs font-bold rounded uppercase tracking-wide leading-snug break-words text-center w-full max-w-full block overflow-visible whitespace-normal ${rating.badge}`}>
                 {rating.category}
               </span>
             </div>
             <p className="text-[10px] text-neutral-500 mt-4 font-medium px-2 leading-relaxed">
-              Measures your revision efficiency over the default flat AI output under standard constraints.
+              How much of the room left above the AI's own answer your edit actually closed.
             </p>
 
             {percentileInfo && (
@@ -386,7 +389,7 @@ Verify my score and take the test: ${verifyLink}
             className="group w-full flex items-center justify-center gap-2 bg-neutral-900 text-white hover:bg-black active:bg-neutral-800 transition-colors rounded-xl px-4 py-3.5 text-xs font-bold shadow-sm cursor-pointer"
           >
             <RefreshCw className="w-4 h-4 text-amber-500 group-hover:rotate-180 transition-transform duration-500" />
-            Benchmark New Scenario
+            Take it again
           </button>
         </div>
 
@@ -477,17 +480,17 @@ Verify my score and take the test: ${verifyLink}
                   <div className="flex items-center gap-2 pb-2 border-b border-neutral-100">
                     <PenTool className="w-4 h-4 text-amber-500" />
                     <h3 className="text-sm font-bold text-neutral-800 uppercase tracking-wider">
-                      Share Your Experience Feedback
+                      How was it?
                     </h3>
                   </div>
                   <p className="text-xs text-neutral-500 leading-relaxed font-medium">
-                    Your feedback is essential to maintaining strict standards for cognitive calibration. Please write a brief remark below to unlock the secure bench-marking social share tools.
+                    Optional — tell us how the test felt. It helps us improve the questions.
                   </p>
                   
                   {isFeedbackSubmitted ? (
                     <div className="bg-emerald-50 border border-emerald-100 p-3.5 rounded-xl text-emerald-700 text-xs font-semibold flex items-center gap-2.5">
                       <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                      Thank you! Your feedback has been logged securely and the social share utilities have been successfully unlocked below.
+                      Thanks — that's really useful.
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -495,7 +498,7 @@ Verify my score and take the test: ${verifyLink}
                         rows={3}
                         value={feedback}
                         onChange={(e) => setFeedback(e.target.value)}
-                        placeholder="Excellent evaluation. The scenario was highly relevant and challenging, and the AI assessment metrics were very clear..."
+                        placeholder="Was the task realistic? Was anything confusing?"
                         className="w-full text-xs font-medium rounded-xl border border-neutral-200 p-3 text-neutral-800 bg-neutral-50 focus:bg-white focus:outline-none focus:border-amber-500 transition-colors placeholder-neutral-400"
                       />
                       <div className="flex justify-end">
@@ -505,15 +508,17 @@ Verify my score and take the test: ${verifyLink}
                           disabled={isSubmittingFeedback || !feedback.trim()}
                           className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 disabled:opacity-50 text-neutral-900 font-bold px-5 py-2.5 text-xs rounded-xl shadow-sm transition-colors cursor-pointer"
                         >
-                          {isSubmittingFeedback ? "Saving feedback..." : "Submit Feedback & Unlock Share"}
+                          {isSubmittingFeedback ? "Sending..." : "Send feedback"}
                         </button>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Direct Professional Social Share Panel */}
-                {isFeedbackSubmitted && (
+                {/* Share panel -- always available. Sharing your own result
+                    was previously locked behind submitting feedback, which is a
+                    dark pattern: the two are unrelated. */}
+                {(
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}

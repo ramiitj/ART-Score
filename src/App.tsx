@@ -392,6 +392,7 @@ export default function App() {
                 domain={domain}
                 difficulty={difficulty}
                 timeLimitSeconds={timeLimitSeconds}
+                itemsTotal={itemsTotal}
                 onBeginTest={() => setStep(TestStep.ACTIVE_TEST)}
               />
             )}
@@ -405,12 +406,14 @@ export default function App() {
                 baseline={baseline}
                 baselinePrompt={baselinePrompt}
                 timeLimitSeconds={timeLimitSeconds}
+                itemIndex={itemIndex}
+                itemsTotal={itemsTotal}
                 onSubmit={handleSubmitRevision}
               />
             )}
 
             {step === TestStep.EVALUATING && (
-              <EvaluatingScreen />
+              <EvaluatingScreen itemIndex={itemIndex} itemsTotal={itemsTotal} />
             )}
 
             {step === TestStep.EVALUATION_ERROR && (

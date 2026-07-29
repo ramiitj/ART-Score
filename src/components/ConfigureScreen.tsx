@@ -62,13 +62,13 @@ export default function ConfigureScreen({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!userName.trim() || !userEmail.trim()) {
-      setError("Please fill out your identity parameters to begin.");
+      setError("Please enter your name and email to begin.");
       return;
     }
-    if (!age || !gender || !education || !workExperience) {
-      setError("Please complete all professional background details.");
-      return;
-    }
+    // Demographics are optional. They exist for the research dataset, and
+    // consent to that is itself optional -- so requiring someone to state
+    // their age and gender before they can take the test would be
+    // incoherent. Left blank, they are simply not recorded.
     setError("");
     onGenerate({
       userName,
@@ -91,10 +91,10 @@ export default function ConfigureScreen({
         className="mb-1 text-center"
       >
         <span className="text-[10px] uppercase font-mono font-bold py-0.5 px-2.5 rounded bg-neutral-900 text-amber-500 tracking-wider">
-          Step 2: Candidate Intake & Session Setup
+          Step 2 of 2
         </span>
         <h2 className="text-lg md:text-xl font-extrabold text-neutral-800 mt-1 font-sans tracking-tight">
-          Configure Your Evaluation
+          Set up your test
         </h2>
       </motion.div>
 
@@ -109,7 +109,7 @@ export default function ConfigureScreen({
           {/* Section 1: Identity Parameters */}
           <div className="space-y-1.5">
             <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-450 hidden md:block">
-              Identity Profile
+              About you
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div>
@@ -146,8 +146,11 @@ export default function ConfigureScreen({
 
           <div className="border-b border-neutral-100 my-0.5"></div>
 
-          {/* Section 2: Demographic Details */}
+          {/* Section 2: Demographic Details -- all optional */}
           <div className="space-y-1.5">
+            <p className="text-[10px] text-neutral-400 font-medium">
+              Optional — used only for anonymised research, and only if you consent below.
+            </p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div>
                 <label className="block text-[11px] font-bold text-neutral-750 mb-0.5 flex items-center gap-1">
@@ -158,7 +161,6 @@ export default function ConfigureScreen({
                   type="number"
                   min="1"
                   max="120"
-                  required
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
                   placeholder="Years"
@@ -172,7 +174,6 @@ export default function ConfigureScreen({
                   Gender
                 </label>
                 <select
-                  required
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
                   className="w-full rounded border border-neutral-200 px-2 py-1.5 text-xs text-neutral-800 bg-white hover:bg-neutral-50 focus:outline-none focus:border-amber-500 font-semibold transition-all cursor-pointer"
@@ -192,7 +193,6 @@ export default function ConfigureScreen({
                   Education
                 </label>
                 <select
-                  required
                   value={education}
                   onChange={(e) => setEducation(e.target.value)}
                   className="w-full rounded border border-neutral-200 px-2 py-1.5 text-xs text-neutral-800 bg-white hover:bg-neutral-50 focus:outline-none focus:border-amber-500 font-semibold transition-all cursor-pointer"
@@ -216,7 +216,6 @@ export default function ConfigureScreen({
                   type="number"
                   min="0"
                   max="80"
-                  required
                   value={workExperience}
                   onChange={(e) => setWorkExperience(e.target.value)}
                   placeholder="Years"
@@ -233,7 +232,7 @@ export default function ConfigureScreen({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div>
                 <label className="block text-[11px] font-bold text-neutral-800 mb-0.5">
-                  Target Domain Expert Area
+                  Your field
                 </label>
                 <select
                   value={domain}
@@ -250,7 +249,7 @@ export default function ConfigureScreen({
 
               <div>
                 <label className="block text-[11px] font-bold text-neutral-800 mb-0.5">
-                  Challenge Tier
+                  Difficulty
                 </label>
                 <div className="grid grid-cols-3 gap-1">
                   {DIFFICULTY_LEVELS.map((level) => (
@@ -312,12 +311,12 @@ export default function ConfigureScreen({
               {isLoading ? (
                 <div className="flex items-center gap-1.5">
                   <div className="w-4 h-4 border-2 border-neutral-800 border-t-transparent rounded-full animate-spin"></div>
-                  Generating Challenge...
+                  Preparing your first task...
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-neutral-950" />
-                  Generate Challenge Scenario
+                  Start the test
                   <ArrowRight className="w-4 h-4 text-neutral-950" />
                 </div>
               )}
