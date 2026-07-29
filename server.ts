@@ -17,6 +17,7 @@ import {
   EXECUTOR_MODEL,
   EXECUTOR_TEMPERATURE,
   JUDGE_MODEL,
+  ABSOLUTE_JUDGE_PASS_COUNT,
   buildSelfRevisePrompt,
   generateGapManifest,
   judgePairedComparison,
@@ -25,9 +26,9 @@ import {
   computePercentile,
   aggregateRunResults,
   ITEMS_PER_RUN,
-  assessCeilingStability,
   computeEditDistance,
   selectTaskArchetype,
+  decideEvaluationClaim,
   decomposeVariance,
   computeScoreShiftReport,
   computeElevationMonitor,
@@ -213,6 +214,26 @@ async function appendSessionToRun(runId: string, sessionId: string, taskArchetyp
   }
 }
 
+// Single place for session status transitions, so the claim/release lifecycle
+// (see server/headroom/sessionLock.ts) behaves identically against Firestore
+// and the in-memory fallback. Never throws: failing to release a lock must
+// not mask the underlying error the caller is already handling.
+async function setSessionStatus(sessionId: string, status: string, extra: Record<string, any> = {}) {
+  const patch = { status, ...extra };
+  const db = getFirestoreDb();
+  if (db !== null) {
+    try {
+      await db.collection("sessions").doc(sessionId).update(patch);
+      return;
+    } catch (err) {
+      console.error(`❌ Failed to set session ${sessionId} status to "${status}":`, err);
+      return;
+    }
+  }
+  const localSession = localSessions.find(s => s.sessionId === sessionId);
+  if (localSession) Object.assign(localSession, patch);
+}
+
 // Admin Authentication Middleware
 function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (ADMIN_KEYS.length === 0) {
@@ -365,8 +386,11 @@ async function getRubricPromptForSession(session: any): Promise<string> {
   return MASTER_SYSTEM_PROMPT;
 }
 
-// Reusable 3-pass judging logic with per-pass resilience (FIX 4, 8)
-async function scoreOutputThreePass(
+// Legacy absolute (0-100, five-dimension) scorer, with per-pass resilience
+// (FIX 4, 8). Runs ABSOLUTE_JUDGE_PASS_COUNT passes -- one, because every
+// pass here sends an identical prompt at temperature 0 / topP 1, so repeats
+// return the same answer. Retired entirely at the Phase 4 cutover.
+async function scoreOutputAbsolute(
   ai: GoogleGenAI,
   activePrompt: string,
   task: string,
@@ -507,20 +531,18 @@ You must output a structured JSON response matching the required schema.`;
     }
   };
 
-  console.log(`[Three-Pass Scorer] Launching concurrent passes (isBaselineScoring: ${isBaselineScoring})...`);
-  const settled = await Promise.allSettled([
-    runSinglePassWithRetry(1),
-    runSinglePassWithRetry(2),
-    runSinglePassWithRetry(3)
-  ]);
+  console.log(`[Absolute Scorer] Launching ${ABSOLUTE_JUDGE_PASS_COUNT} pass(es) (isBaselineScoring: ${isBaselineScoring})...`);
+  const settled = await Promise.allSettled(
+    Array.from({ length: ABSOLUTE_JUDGE_PASS_COUNT }, (_, i) => runSinglePassWithRetry(i + 1))
+  );
 
   const validPasses = settled
     .filter((s): s is PromiseFulfilledResult<any> => s.status === "fulfilled")
     .map(s => s.value);
 
-  if (validPasses.length < 3) {
-    console.error(`[Three-Pass Scorer] Only ${validPasses.length} valid passes remained. Aborting score.`);
-    return null; // Triggers pending scoring path
+  if (validPasses.length < ABSOLUTE_JUDGE_PASS_COUNT) {
+    console.error(`[Absolute Scorer] Only ${validPasses.length}/${ABSOLUTE_JUDGE_PASS_COUNT} valid passes remained. Aborting score.`);
+    return null; // Triggers the honest evaluation-failed path
   }
 
   return aggregatePasses(validPasses);
@@ -655,7 +677,7 @@ Elements Included: [Brief description of the domain-specific elements included]
 
           if (candidateBaselineOutput) {
             // Reusable 3-pass scoring logic for baseline pre-scoring (FIX 4 & 7)
-            const scoreResult = await scoreOutputThreePass(
+            const scoreResult = await scoreOutputAbsolute(
               ai,
               activePrompt,
               candidateTask,
@@ -724,54 +746,32 @@ Elements Included: [Brief description of the domain-specific elements included]
       });
     }
 
-    // Headroom migration Phase 1 (shadow mode): run the model's own self-revision
-    // of the baseline under the pinned Executor. Two independent self-revisions
-    // are generated and blind-compared (§8 ceiling stability check) so the
-    // ceiling used downstream is the model's *best* self-revision rather than
-    // an arbitrary single draw -- if the comparison is a coin-flip, either is
-    // fine and the ceiling is stable; if one dominates, that one is used.
-    // This does not affect the score returned below — it only records the
-    // self-revised ceiling so the Headroom denominator can later be anchored
-    // against it (see docs/HEADROOM_MIGRATION_SPEC.md).
+    // Headroom migration Phase 1: run the model's own self-revision of the
+    // baseline under the pinned Executor. This output IS the ceiling -- the
+    // comparison target for both the validity gate (paired comparison) and R
+    // (manifest resolution) at evaluation time, so it must be stored on the
+    // session and survive to the next request.
+    //
+    // Two things this deliberately does NOT do any more:
+    //   * It does not run a second self-revision + blind comparison to pick
+    //     the "stronger" ceiling (§8 stability check). At
+    //     EXECUTOR_TEMPERATURE = 0 both draws come from an identical prompt,
+    //     so that check cost 4 extra calls to compare a text against a near
+    //     copy of itself. assessCeilingStability() is kept and tested for the
+    //     day EXECUTOR_TEMPERATURE is ever non-zero; it is simply not worth
+    //     calling at temperature 0.
+    //   * It does not absolute-score the ceiling. selfRevisedQualityScore was
+    //     written to Firestore and read by nothing at all.
     let selfRevisedOutput = "";
-    let selfRevisedQualityScore: number | null = null;
-    let selfRevisedSpread: number | null = null;
-    let selfRevisedCeilingStable: boolean | null = null;
     try {
-      const selfRevisePrompt = buildSelfRevisePrompt(selectedTask, selectedBaseline);
-      const [selfReviseResA, selfReviseResB] = await Promise.all([
-        ai.models.generateContent({ model: EXECUTOR_MODEL, contents: selfRevisePrompt, config: { temperature: EXECUTOR_TEMPERATURE } }),
-        ai.models.generateContent({ model: EXECUTOR_MODEL, contents: selfRevisePrompt, config: { temperature: EXECUTOR_TEMPERATURE } })
-      ]);
-      const revisionA = selfReviseResA.text || "";
-      const revisionB = selfReviseResB.text || "";
-
-      if (revisionA && revisionB) {
-        const paired = await judgePairedComparison(ai, selectedTask, revisionA, revisionB);
-        if (paired) {
-          const stability = assessCeilingStability(paired);
-          selfRevisedCeilingStable = stability.stable;
-          selfRevisedOutput = stability.strongerOutput === "B" ? revisionB : revisionA;
-        } else {
-          // Blind comparison failed (e.g. judge model error) -- fall back to
-          // the first draw rather than losing the ceiling entirely.
-          selfRevisedOutput = revisionA;
-        }
-      } else {
-        selfRevisedOutput = revisionA || revisionB;
-      }
-
-      if (selfRevisedOutput) {
-        const selfReviseScore = await scoreOutputThreePass(
-          ai, activePrompt, selectedTask, selfRevisedOutput, "", domain, difficulty, true
-        );
-        if (selfReviseScore) {
-          selfRevisedQualityScore = selfReviseScore.total;
-          selfRevisedSpread = selfReviseScore.spread;
-        }
-      }
+      const selfReviseRes = await ai.models.generateContent({
+        model: EXECUTOR_MODEL,
+        contents: buildSelfRevisePrompt(selectedTask, selectedBaseline),
+        config: { temperature: EXECUTOR_TEMPERATURE }
+      });
+      selfRevisedOutput = selfReviseRes.text || "";
     } catch (err) {
-      console.warn("[Self-Revision Shadow] Failed to compute self-revised ceiling for session; continuing without it.", err);
+      console.warn("[Self-Revision] Failed to compute self-revised ceiling for session; continuing without it.", err);
     }
 
     // Headroom migration Phase 2 (shadow mode): generate the hidden gap
@@ -796,10 +796,7 @@ Elements Included: [Brief description of the domain-specific elements included]
       generationModelUsed: usedModel,
       executorModel: EXECUTOR_MODEL, // Headroom migration Phase 1: pinned Executor provenance
       executorTemperature: EXECUTOR_TEMPERATURE,
-      selfRevisedOutput, // Headroom migration Phase 1 (shadow): self-revised ceiling, never sent to client
-      selfRevisedQualityScore,
-      selfRevisedSpread,
-      selfRevisedCeilingStable, // Headroom migration §8: null if the stability check couldn't run, else true/false
+      selfRevisedOutput, // Headroom migration Phase 1: the ceiling. Required at evaluation time; never sent to client
       gapManifest, // Headroom migration Phase 2 (shadow): hidden gap manifest, never sent to client
       rubricVersionId: activeRubricVersionId, // Store current rubric version ID (FIX 9.1 & 11.11)
       systemPrompt: activePrompt, // Keep versioned system prompt on the session (FIX 9.1 & 11.11)
@@ -926,15 +923,19 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
       return res.status(404).json({ error: "Session not found or has expired." });
     }
 
-    if (sessionData.status !== "active") {
-      return res.status(409).json({ error: "Evaluation Rejected: This session has already been evaluated." });
+    // Claim the session for scoring (FIX 11.5). A session is scored exactly
+    // once, but a FAILED evaluation must remain retryable -- so the claim is
+    // "scoring", not "completed", and it is released back to "active" if
+    // anything below fails. See server/headroom/sessionLock.ts.
+    const claim = decideEvaluationClaim(sessionData.status, sessionData.scoringStartedAt);
+    if (!claim.claimable) {
+      return res.status(409).json({ error: claim.reason });
     }
 
-    // Set session status to completed immediately to enforce single-evaluation logic (FIX 11.5)
-    sessionData.status = "completed";
-    if (db !== null) {
-      await db.collection("sessions").doc(sessionId).update({ status: "completed" });
-    }
+    const scoringStartedAt = new Date().toISOString();
+    sessionData.status = "scoring";
+    sessionData.scoringStartedAt = scoringStartedAt;
+    await setSessionStatus(sessionId, "scoring", { scoringStartedAt });
 
     // 2. Perform Injection Check AFTER lookup (FIX 5.1). Advisory only (Phase
     // 5): a regex hit no longer skips scoring or forces a zero by itself --
@@ -1005,6 +1006,9 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
         localAttempts.unshift({ id: sessionId, ...emptyAttempt });
       }
 
+      // A blank/unchanged submission IS a completed evaluation (score 0),
+      // not a failure -- close the session rather than releasing it.
+      await setSessionStatus(sessionId, "completed");
       return res.json(emptyResult);
     }
 
@@ -1025,7 +1029,7 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
     // the edited prompt in context and sets integrityViolation itself, which
     // computeFinalEvaluation's C1 guardrail below treats as authoritative.
     const rubricPrompt = await getRubricPromptForSession(sessionData); // FIX 9
-    const scoreResult = await scoreOutputThreePass(
+    const scoreResult = await scoreOutputAbsolute(
       ai,
       rubricPrompt,
       sessionData.task,
@@ -1092,6 +1096,9 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
         localAttempts.unshift({ id: sessionId, ...pendingAttempt });
       }
 
+      // Scoring genuinely failed -- release the claim so the person's Retry
+      // actually works instead of hitting a 409.
+      await setSessionStatus(sessionId, "active", { scoringStartedAt: null });
       return res.status(503).json(pendingResult);
     }
 
@@ -1173,10 +1180,14 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
       localAttempts.unshift({ id: sessionId, ...attemptRecord });
     }
 
+    // Scored successfully -- close the session permanently.
+    await setSessionStatus(sessionId, "completed");
     return res.json(finalEvaluation);
 
   } catch (error: any) {
     console.error("❌ Fatal unhandled exception in evaluate-revision pipeline:", error);
+    // Release the claim so a retry is possible (best-effort; never throws).
+    await setSessionStatus(sessionId, "active", { scoringStartedAt: null });
 
     // No fallback mode: report the failure honestly rather than disguising
     // it as a completed 0% evaluation.
@@ -1821,7 +1832,7 @@ async function processPendingScores() {
       }
 
       // Run the 3-pass scoring
-      const scoreResult = await scoreOutputThreePass(
+      const scoreResult = await scoreOutputAbsolute(
         ai,
         rubricPrompt,
         attempt.task,

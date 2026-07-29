@@ -29,9 +29,20 @@ export const EXECUTOR_TEMPERATURE = 0;
 export const JUDGE_MODEL = GEMINI_MODEL;
 export const JUDGE_TEMPERATURE = 0;
 
-// Independent judge passes per comparison; position is randomized
-// independently on each pass so no consistent order or identity signal survives.
+// Independent judge passes per BLIND COMPARISON (paired comparison, manifest
+// resolution). Three passes are load-bearing here because position is
+// randomized independently on each pass: the passes are genuinely different
+// inputs, so disagreement across them is real information about position bias
+// and about the item itself.
 export const JUDGE_PASS_COUNT = 3;
+
+// Passes for the legacy ABSOLUTE scorer (baseline / steered 0-100 scoring).
+// One, deliberately. Unlike the blind comparisons above, these passes send an
+// identical prompt at temperature 0 / topP 1 -- nothing varies between them,
+// so repeating the call bought a median over near-identical values and a
+// spread that was ~0 by construction. Paying 3x for that is waste. This
+// scorer is retired entirely at the Phase 4 cutover.
+export const ABSOLUTE_JUDGE_PASS_COUNT = 1;
 
 // The steered output must win at least this fraction of blind paired-comparison
 // passes for Headroom to be non-zero. Below this, there is no reliable

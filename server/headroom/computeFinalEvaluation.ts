@@ -16,16 +16,15 @@ export function computeFinalEvaluation(
   // itself does not confirm an integrity violation.
   regexInjectionSuspected: boolean
 ) {
-  const p1 = scoreResult.passes[0];
-  const p2 = scoreResult.passes[1];
-  const p3 = scoreResult.passes[2];
   const finalAbsoluteScore = scoreResult.total;
 
-  const sums = [
-    p1.clarityScore + p1.depthScore + p1.structureScore + p1.actionabilityScore + p1.domainScore,
-    p2.clarityScore + p2.depthScore + p2.structureScore + p2.actionabilityScore + p2.domainScore,
-    p3.clarityScore + p3.depthScore + p3.structureScore + p3.actionabilityScore + p3.domainScore
-  ];
+  // The "ruling pass" is whichever pass sits closest to the aggregate total;
+  // its rationales and diff inventory are the ones reported. Written for any
+  // pass count -- the absolute scorer now runs a single pass
+  // (ABSOLUTE_JUDGE_PASS_COUNT), where this trivially selects that pass.
+  const sums = scoreResult.passes.map(
+    p => p.clarityScore + p.depthScore + p.structureScore + p.actionabilityScore + p.domainScore
+  );
   const diffs = sums.map(s => Math.abs(s - finalAbsoluteScore));
   const minIdx = diffs.indexOf(Math.min(...diffs));
   const rulingPass = scoreResult.passes[minIdx];

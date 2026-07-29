@@ -5,28 +5,52 @@ export function medianOfThree(a: number, b: number, c: number): number {
   return [a, b, c].sort((x, y) => x - y)[1];
 }
 
-// Aggregate three judge passes into medians, total, and per-dimension spreads.
-// Returns null if fewer than 3 valid passes were provided (triggers pending scoring path upstream).
+// Median over any number of passes. With a single pass this is just that
+// pass's value, which is the normal case now that the absolute scorer runs
+// one pass (see ABSOLUTE_JUDGE_PASS_COUNT in constants.ts).
+function median(values: number[]): number {
+  const sorted = [...values].sort((x, y) => x - y);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function spreadOf(values: number[]): number {
+  return Math.max(...values) - Math.min(...values);
+}
+
+// Aggregate N judge passes into medians, total, and per-dimension spreads.
+// Returns null only when there are no valid passes at all (triggers the
+// pending/error path upstream).
+//
+// NOTE on spread: with a single pass every spread is 0 by construction, so
+// the `judgeUnstable = spread > 4` comparability gate cannot fire. That gate
+// was already close to inert -- the passes it measured were identical calls
+// (same prompt, temperature 0, topP 1), so they disagreed only through
+// serving-level nondeterminism. The meaningful instability signal is the new
+// judge's `disagreement` flag, where position IS randomized per pass and
+// disagreement is real information about the item (spec §5.1).
 export function aggregatePasses(validPasses: JudgePassResult[]): AggregatedScore | null {
-  if (validPasses.length < 3) {
+  if (validPasses.length === 0) {
     return null;
   }
 
-  const p1 = validPasses[0];
-  const p2 = validPasses[1];
-  const p3 = validPasses[2];
+  const clarityScores = validPasses.map(p => p.clarityScore);
+  const depthScores = validPasses.map(p => p.depthScore);
+  const structureScores = validPasses.map(p => p.structureScore);
+  const actionabilityScores = validPasses.map(p => p.actionabilityScore);
+  const domainScores = validPasses.map(p => p.domainScore);
 
-  const clarity = medianOfThree(p1.clarityScore, p2.clarityScore, p3.clarityScore);
-  const depth = medianOfThree(p1.depthScore, p2.depthScore, p3.depthScore);
-  const structure = medianOfThree(p1.structureScore, p2.structureScore, p3.structureScore);
-  const actionability = medianOfThree(p1.actionabilityScore, p2.actionabilityScore, p3.actionabilityScore);
-  const domainScore = medianOfThree(p1.domainScore, p2.domainScore, p3.domainScore);
+  const clarity = median(clarityScores);
+  const depth = median(depthScores);
+  const structure = median(structureScores);
+  const actionability = median(actionabilityScores);
+  const domainScore = median(domainScores);
 
-  const claritySpread = Math.max(p1.clarityScore, p2.clarityScore, p3.clarityScore) - Math.min(p1.clarityScore, p2.clarityScore, p3.clarityScore);
-  const depthSpread = Math.max(p1.depthScore, p2.depthScore, p3.depthScore) - Math.min(p1.depthScore, p2.depthScore, p3.depthScore);
-  const structureSpread = Math.max(p1.structureScore, p2.structureScore, p3.structureScore) - Math.min(p1.structureScore, p2.structureScore, p3.structureScore);
-  const actionabilitySpread = Math.max(p1.actionabilityScore, p2.actionabilityScore, p3.actionabilityScore) - Math.min(p1.actionabilityScore, p2.actionabilityScore, p3.actionabilityScore);
-  const domainSpread = Math.max(p1.domainScore, p2.domainScore, p3.domainScore) - Math.min(p1.domainScore, p2.domainScore, p3.domainScore);
+  const claritySpread = spreadOf(clarityScores);
+  const depthSpread = spreadOf(depthScores);
+  const structureSpread = spreadOf(structureScores);
+  const actionabilitySpread = spreadOf(actionabilityScores);
+  const domainSpread = spreadOf(domainScores);
 
   const spread = Math.max(claritySpread, depthSpread, structureSpread, actionabilitySpread, domainSpread);
 

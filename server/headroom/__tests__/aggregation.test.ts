@@ -42,10 +42,32 @@ describe("medianOfThree", () => {
 });
 
 describe("aggregatePasses", () => {
-  it("returns null when fewer than 3 passes are provided", () => {
+  it("returns null only when there are no passes at all", () => {
     expect(aggregatePasses([])).toBeNull();
-    expect(aggregatePasses([makePass()])).toBeNull();
-    expect(aggregatePasses([makePass(), makePass()])).toBeNull();
+  });
+
+  it("aggregates a single pass: medians are that pass's scores and every spread is 0", () => {
+    // This is the normal path now -- the absolute scorer runs one pass
+    // (ABSOLUTE_JUDGE_PASS_COUNT), because its repeats were identical calls.
+    const result = aggregatePasses([
+      makePass({ clarityScore: 12, depthScore: 5, structureScore: 20, actionabilityScore: 8, domainScore: 14 })
+    ]);
+
+    expect(result).not.toBeNull();
+    expect(result!.medians).toEqual({ clarity: 12, depth: 5, structure: 20, actionability: 8, domain: 14 });
+    expect(result!.total).toBe(59);
+    expect(result!.spread).toBe(0);
+    expect(result!.dimensionSpreads).toEqual({ clarity: 0, depth: 0, structure: 0, actionability: 0, domain: 0 });
+    expect(result!.passes).toHaveLength(1);
+  });
+
+  it("aggregates two passes by averaging the middle pair (even-count median)", () => {
+    const result = aggregatePasses([
+      makePass({ clarityScore: 10 }),
+      makePass({ clarityScore: 14 })
+    ]);
+    expect(result!.medians.clarity).toBe(12);
+    expect(result!.dimensionSpreads.clarity).toBe(4);
   });
 
   it("computes per-dimension medians, total, and spreads across exactly 3 passes", () => {

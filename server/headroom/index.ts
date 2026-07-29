@@ -6,6 +6,7 @@ export {
   JUDGE_MODEL,
   JUDGE_TEMPERATURE,
   JUDGE_PASS_COUNT,
+  ABSOLUTE_JUDGE_PASS_COUNT,
   VALIDITY_GATE_THRESHOLD,
   ITEMS_PER_RUN
 } from "./constants";
@@ -34,6 +35,8 @@ export {
 } from "./validityMonitors";
 export { computeEditDistance } from "./editDistance";
 export { selectTaskArchetype } from "./archetypeSampling";
+export { decideEvaluationClaim, STALE_SCORING_CLAIM_MS } from "./sessionLock";
+export type { SessionStatus, ClaimDecision } from "./sessionLock";
 export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem } from "./types";
 export type {
   GapItem,

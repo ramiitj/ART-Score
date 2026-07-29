@@ -68,6 +68,20 @@ describe("computeFinalEvaluation — normal path", () => {
   });
 });
 
+describe("computeFinalEvaluation — single-pass scoring", () => {
+  it("works with one pass, which is how the absolute scorer now runs", () => {
+    // Regression guard: this function used to index passes[0..2] directly and
+    // threw on a single-pass score result.
+    const scoreResult = aggregatePasses([makePass()])!;
+    const result = computeFinalEvaluation(baseSession(), scoreResult, "improved output", PLAIN_REVISION, 30, false);
+
+    expect(result.score).toBe(40);
+    expect(result.rawDeltaScore).toBe(20);
+    expect(result.insight).toBe("overall insight");
+    expect(result.judgeUnstable).toBe(false); // spread is 0 by construction with one pass
+  });
+});
+
 describe("computeFinalEvaluation — C1 Integrity Violation guardrail", () => {
   it("zeroes the score when the ruling pass confirms an integrity violation, overriding an otherwise high score", () => {
     // 5 dims x 20 = 100 -> pre-guardrail finalScore would be 100.
