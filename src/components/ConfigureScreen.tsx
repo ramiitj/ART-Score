@@ -69,10 +69,6 @@ export default function ConfigureScreen({
       setError("Please complete all professional background details.");
       return;
     }
-    if (!researchConsent) {
-      setError("Prior to starting, you must review and consent to using anonymized data for research.");
-      return;
-    }
     setError("");
     onGenerate({
       userName,
@@ -278,7 +274,7 @@ export default function ConfigureScreen({
 
           <div className="border-b border-neutral-100 my-0.5"></div>
 
-          {/* Section 4: Research Consent Checkbox */}
+          {/* Section 4: Research Consent Checkbox (optional -- you can proceed without checking this) */}
           <div className="pt-0">
             <label className="flex items-start gap-2 cursor-pointer selection:bg-transparent">
               <input
@@ -286,10 +282,9 @@ export default function ConfigureScreen({
                 checked={researchConsent}
                 onChange={(e) => setResearchConsent(e.target.checked)}
                 className="mt-0.5 rounded border-neutral-300 text-amber-500 focus:ring-amber-500 h-3.5 w-3.5 cursor-pointer"
-                required
               />
               <span className="text-[10px] text-neutral-500 leading-tight font-medium">
-                I hereby consent to using my anonymized evaluation details for research and aggregated cognitive benchmarking statistics.
+                (Optional) I consent to using my anonymized evaluation details for research and aggregated cognitive benchmarking statistics.
               </span>
             </label>
           </div>

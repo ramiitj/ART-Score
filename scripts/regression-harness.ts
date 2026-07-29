@@ -31,7 +31,9 @@ export function loadAttempts(filePath: string): any[] {
 export function toRecords(attempts: any[]): ScoreShiftRecord[] {
   const records: ScoreShiftRecord[] = [];
   for (const a of attempts) {
-    if (a?.comparable !== true) continue;
+    // Aggregated research statistics require the person's consent (the
+    // ConfigureScreen checkbox, optional).
+    if (a?.comparable !== true || a?.researchConsent !== true) continue;
     const oldScore = a?.evaluation?.score ?? a?.score;
     const shadow = a?.headroomShadow;
     if (typeof oldScore !== "number" || Number.isNaN(oldScore)) continue;

@@ -36,10 +36,15 @@ export function loadAttempts(filePath: string): any[] {
   throw new Error("Expected a JSON array of attempts, or { attempts: [...] }.");
 }
 
+// All three extraction functions below require researchConsent === true, in
+// addition to comparable === true: every monitor here is exactly "aggregated
+// cognitive benchmarking statistics", which the ConfigureScreen consent
+// checkbox (optional) explicitly gates.
+
 export function toPSteeredValues(attempts: any[]): number[] {
   const values: number[] = [];
   for (const a of attempts) {
-    if (a?.comparable !== true) continue;
+    if (a?.comparable !== true || a?.researchConsent !== true) continue;
     const pSteered = a?.headroomShadow?.pSteered;
     if (typeof pSteered === "number" && !Number.isNaN(pSteered)) values.push(pSteered);
   }
@@ -49,7 +54,7 @@ export function toPSteeredValues(attempts: any[]): number[] {
 export function toLeakageRecords(attempts: any[]): LeakageMonitorRecord[] {
   const records: LeakageMonitorRecord[] = [];
   for (const a of attempts) {
-    if (a?.comparable !== true) continue;
+    if (a?.comparable !== true || a?.researchConsent !== true) continue;
     const resolution = a?.headroomShadow?.resolution;
     const editDistanceNorm = a?.editDistanceNorm;
     if (typeof resolution !== "number" || typeof editDistanceNorm !== "number") continue;
@@ -61,7 +66,7 @@ export function toLeakageRecords(attempts: any[]): LeakageMonitorRecord[] {
 export function toModelEraRecords(attempts: any[]): ModelEraRecord[] {
   const records: ModelEraRecord[] = [];
   for (const a of attempts) {
-    if (a?.comparable !== true) continue;
+    if (a?.comparable !== true || a?.researchConsent !== true) continue;
     const headroomScoreShadow = a?.headroomShadow?.headroomScoreShadow;
     const model = a?.executorModel;
     const timestamp = a?.timestamp;

@@ -27,7 +27,10 @@ export function loadAttempts(filePath: string): any[] {
 export function toRecords(attempts: any[]): VarianceDecompositionRecord[] {
   const records: VarianceDecompositionRecord[] = [];
   for (const a of attempts) {
-    if (a?.comparable !== true) continue;
+    // Aggregated research statistics require the person's consent (the
+    // ConfigureScreen checkbox, optional) -- a non-consenting attempt must
+    // not feed this decomposition even if it is otherwise comparable.
+    if (a?.comparable !== true || a?.researchConsent !== true) continue;
     const score = a?.evaluation?.score ?? a?.score;
     if (typeof score !== "number" || Number.isNaN(score)) continue;
 

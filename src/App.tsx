@@ -94,7 +94,16 @@ export default function App() {
         }),
       });
       const data = await res.json();
-      
+
+      // No fallback: a non-OK response, or a response missing the fields a
+      // real generated task always has, means generation genuinely failed
+      // (rate limit, transient outage, etc). Route to an honest error
+      // instead of silently substituting placeholder task/baseline text --
+      // there is no server-side fallback content to fall back to either.
+      if (!res.ok || !data.sessionId || !data.task || !data.baselinePrompt) {
+        throw new Error(data?.error || `Task generator responded with status ${res.status}.`);
+      }
+
       setUserName(config.userName);
       setUserEmail(config.userEmail);
       setDomain(config.domain);
@@ -104,11 +113,11 @@ export default function App() {
       setEducation(config.education);
       setWorkExperience(config.workExperience);
       setResearchConsent(config.researchConsent);
-      
-      setSessionId(data.sessionId || "");
-      setTask(data.task || "Construct an optimized implementation guideline...");
-      setBaseline(data.baseline || "Simple generic implementation text...");
-      setBaselinePrompt(data.baselinePrompt || "");
+
+      setSessionId(data.sessionId);
+      setTask(data.task);
+      setBaseline(data.baseline || "");
+      setBaselinePrompt(data.baselinePrompt);
       setBaselineQualityScore(0);
       setHeadroom(0);
       setFailureModeTags("");
@@ -122,7 +131,14 @@ export default function App() {
       setStep(TestStep.TOUR);
     } catch (e: any) {
       console.error(e);
-      setErrorPrompt("Failed to connect to the task generator API endpoint. Please retry.");
+      // A raw fetch()-level TypeError (e.g. "Failed to fetch") is a genuine
+      // network failure; anything else was thrown deliberately above with a
+      // real message (a server error string, or an explicit status/field
+      // failure).
+      const message = e instanceof TypeError
+        ? "We couldn't reach the task generator — check your connection and retry."
+        : (e?.message || "The task generator could not be reached.");
+      setErrorPrompt(message);
     } finally {
       setLoadingTask(false);
     }

@@ -7,12 +7,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import admin from "firebase-admin";
 import dotenv from "dotenv";
 
-import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, FALLBACK_TASKS, GENERATION_GROUND_RULES } from "./asset-data";
+import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, GENERATION_GROUND_RULES } from "./asset-data";
 import {
   MASTER_SYSTEM_PROMPT,
   maskName,
   aggregatePasses,
   computeFinalEvaluation,
+  GEMINI_MODEL,
   EXECUTOR_MODEL,
   EXECUTOR_TEMPERATURE,
   JUDGE_MODEL,
@@ -145,28 +146,10 @@ function getGeminiClient(): GoogleGenAI {
   return geminiClient;
 }
 
-const MODEL_WATERFALL = [
-  "gemini-3.1-flash-lite",
-  "gemini-3.5-flash",
-  "gemini-3.1-pro-preview"
-];
-
-async function robustGenerateContent(ai: GoogleGenAI, requestParams: any): Promise<{ response: any, modelUsed: string }> {
-  let lastError: any = null;
-  for (const model of MODEL_WATERFALL) {
-    try {
-      const response = await ai.models.generateContent({
-        ...requestParams,
-        model
-      });
-      return { response, modelUsed: model };
-    } catch (e: any) {
-      console.warn(`[Model Fallback] ${model} failed:\n${e.message || e}`);
-      lastError = e;
-    }
-  }
-  throw lastError;
-}
+// No model-tier fallback (docs/HEADROOM_MIGRATION_SPEC.md): one pinned
+// model, called once. If the call fails -- including a rate limit -- the
+// error propagates to the caller, which surfaces an honest "try again"
+// message rather than silently retrying against a different, weaker model.
 
 // Resolves the test run a new item belongs to (docs/HEADROOM_MIGRATION_SPEC.md
 // §11): continues an in-progress run below ITEMS_PER_RUN items, or starts a
@@ -507,7 +490,7 @@ You must output a structured JSON response matching the required schema.`;
   const runSinglePassWithRetry = async (passId: number): Promise<any> => {
     try {
       const res = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: JUDGE_MODEL,
         contents: judgePrompt,
         config
       });
@@ -516,7 +499,7 @@ You must output a structured JSON response matching the required schema.`;
       console.warn(`[Pass ${passId} First Attempt Failed]: ${err.message || err}. Retrying once...`);
       // Retry once (FIX 8.2)
       const res = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: JUDGE_MODEL,
         contents: judgePrompt,
         config
       });
@@ -584,7 +567,7 @@ app.post("/api/generate-task", generateTaskLimiter, async (req, res) => {
     let selectedBaseline = "";
     let selectedScore = 50;
     let selectedSpread = 0;
-    let usedModel = "gemini-3.5-flash";
+    let usedModel = GEMINI_MODEL;
     let isBandWide = false;
 
     let bestCandidate: any = null;
@@ -645,7 +628,8 @@ Metadata:
 Elements Included: [Brief description of the domain-specific elements included]
 `;
 
-      const { response, modelUsed } = await robustGenerateContent(ai, {
+      const response = await ai.models.generateContent({
+        model: GEMINI_MODEL,
         contents: prompt,
         config: { systemInstruction: activePrompt }
       });
@@ -692,7 +676,7 @@ Elements Included: [Brief description of the domain-specific elements included]
                 baseline: candidateBaselineOutput,
                 score,
                 spread: scoreResult.spread,
-                usedModel: modelUsed
+                usedModel: GEMINI_MODEL
               };
 
               if (!bestCandidate || score > bestCandidate.score) {
@@ -705,7 +689,7 @@ Elements Included: [Brief description of the domain-specific elements included]
                 selectedBaseline = candidateBaselineOutput;
                 selectedScore = score;
                 selectedSpread = scoreResult.spread;
-                usedModel = modelUsed;
+                usedModel = GEMINI_MODEL;
                 isBandWide = false;
                 break;
               }
@@ -729,21 +713,15 @@ Elements Included: [Brief description of the domain-specific elements included]
       isBandWide = true; // Score is outside 48-52 target narrow band (FIX 7.1)
     }
 
-    // If no candidate was found at all, use domain fallback
+    // No fallback: if 4 attempts produced no usable candidate at all, the
+    // honest response is to tell the person to retry, not to substitute a
+    // static, never-touched-by-AI task. This can happen under rate limiting
+    // or a transient outage.
     if (!selectedTask) {
-      console.warn("Unable to generate compliant baseline in 4 attempts. Deploying static fallback.");
-      const fallbackGroup = FALLBACK_TASKS[domain] || FALLBACK_TASKS["General Knowledge Work"];
-      const fallbackItem = fallbackGroup[difficulty] || fallbackGroup["Intermediate"];
-      selectedTask = fallbackItem.task;
-      selectedBaseline = fallbackItem.baseline;
-      // No real generated prompt exists for the static fallback; the baseline
-      // output stands in as the editable "prompt" for this degraded path, which
-      // is already excluded from comparable scoring below.
-      selectedBaselinePrompt = fallbackItem.baseline;
-      selectedScore = 50;
-      selectedSpread = 0;
-      usedModel = "static-fallback";
-      isBandWide = true; // Static fallback (FIX 7.1)
+      console.error(`Unable to generate a task for ${domain}/${difficulty} after 4 attempts.`);
+      return res.status(503).json({
+        error: "The AI service is temporarily unavailable — this can happen when usage limits are reached. Please try again in a few minutes."
+      });
     }
 
     // Headroom migration Phase 1 (shadow mode): run the model's own self-revision
@@ -798,11 +776,8 @@ Elements Included: [Brief description of the domain-specific elements included]
 
     // Headroom migration Phase 2 (shadow mode): generate the hidden gap
     // manifest — the a-priori criterion Judge v2 checks resolution against.
-    // Skipped for the static fallback (no model call available there).
     // Never sent to the client (see docs/HEADROOM_MIGRATION_SPEC.md §6).
-    const gapManifest: GapItem[] = usedModel !== "static-fallback"
-      ? (await generateGapManifest(ai, usedModel, activePrompt, selectedTask, selectedBaseline, domain)) || []
-      : [];
+    const gapManifest: GapItem[] = (await generateGapManifest(ai, usedModel, activePrompt, selectedTask, selectedBaseline, domain)) || [];
 
     // Create a new secure server-side session record
     const sessionId = crypto.randomUUID();
@@ -860,7 +835,12 @@ Elements Included: [Brief description of the domain-specific elements included]
 
   } catch (error: any) {
     console.error("❌ Task generation fatal failure:", error);
-    res.status(500).json({ error: "Failed to generate test task." });
+    // No fallback mode: whatever the underlying cause (rate limit, transient
+    // outage, malformed API key), the honest response is one clear message
+    // telling the person to retry later -- never fabricated task content.
+    res.status(503).json({
+      error: "The AI service is temporarily unavailable — this can happen when usage limits are reached. Please try again in a few minutes."
+    });
   }
 });
 
@@ -1061,20 +1041,24 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
     if (!scoreResult) {
       console.warn(`[Evaluation Pipeline] Downstream judge failed. Enqueueing in pending queue for session ${sessionId}.`);
       
+      // No fallback mode: don't disguise a failed evaluation as a real 0%
+      // result. Report it as an error so the client's existing failure path
+      // (never a fabricated score) handles it honestly.
       const pendingResult = {
         status: "scoring_pending",
+        error: "The evaluation couldn't be completed right now — this can happen when usage limits are reached. Please try again in a few minutes.",
         score: 0,
         baselineQualityScore: sessionData.baselineQualityScore,
         rawDeltaScore: 0,
         headroomEfficiencyScore: 0,
         strengths: [],
-        insight: "The automated evaluation is currently pending. Your score will be updated on the leaderboard automatically shortly.",
+        insight: "The evaluation couldn't be completed right now — this can happen when usage limits are reached. Please try again in a few minutes.",
         clarity: improvedOutput,
         diffInventory: "",
         selfChecks: "",
         confidence: "",
         dimensionScores: [],
-        judgeMetadata: { modelVersion: "gemini-3.1-pro-preview", promptHash: "pending", temperature: 0, rubricVersionId: sessionData.rubricVersionId },
+        judgeMetadata: { modelVersion: JUDGE_MODEL, promptHash: "pending", temperature: 0, rubricVersionId: sessionData.rubricVersionId },
         triageFlags: { guardrailFired: false, reason: "Scoring pending due to temporary downstream judge load", capApplied: 0 },
         textTelemetry: {
           baselineLength: sessionData.baseline.length,
@@ -1108,7 +1092,7 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
         localAttempts.unshift({ id: sessionId, ...pendingAttempt });
       }
 
-      return res.json(pendingResult);
+      return res.status(503).json(pendingResult);
     }
 
     // Step 4: Compute final evaluation and persist (FIX 11)
@@ -1193,26 +1177,28 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
 
   } catch (error: any) {
     console.error("❌ Fatal unhandled exception in evaluate-revision pipeline:", error);
-    
-    // Fallback to scoring_pending rather than crashing or throwing heuristic mock (FIX 2)
+
+    // No fallback mode: report the failure honestly rather than disguising
+    // it as a completed 0% evaluation.
     const sessionCreatedAt = sessionData?.createdAt ? new Date(sessionData.createdAt).getTime() : Date.now();
     const timeTakenServerSeconds = Math.floor((Date.now() - sessionCreatedAt) / 1000);
     const revWords = editedPrompt ? countWords(editedPrompt) : 0;
 
     const pendingResult = {
       status: "scoring_pending",
+      error: "The evaluation couldn't be completed right now — this can happen when usage limits are reached. Please try again in a few minutes.",
       score: 0,
       baselineQualityScore: sessionData?.baselineQualityScore || 50,
       rawDeltaScore: 0,
       headroomEfficiencyScore: 0,
       strengths: [],
-      insight: "The automated evaluation is currently pending. Your score will be updated on the leaderboard automatically shortly.",
+      insight: "The evaluation couldn't be completed right now — this can happen when usage limits are reached. Please try again in a few minutes.",
       clarity: improvedOutput || "Processing...",
       diffInventory: "",
       selfChecks: "",
       confidence: "",
       dimensionScores: [],
-      judgeMetadata: { modelVersion: "gemini-3.1-pro-preview", promptHash: "pending", temperature: 0, rubricVersionId: sessionData?.rubricVersionId || "v1.0.0" },
+      judgeMetadata: { modelVersion: JUDGE_MODEL, promptHash: "pending", temperature: 0, rubricVersionId: sessionData?.rubricVersionId || "v1.0.0" },
       triageFlags: { guardrailFired: false, reason: "Scoring pending due to fatal unhandled exception", capApplied: 0 },
       textTelemetry: {
         baselineLength: sessionData?.baseline?.length || 100,
@@ -1250,7 +1236,7 @@ app.post("/api/evaluate-revision", evaluateRevisionLimiter, async (req, res) => 
       localAttempts.unshift({ id: sessionId, ...pendingAttempt });
     }
 
-    return res.json(pendingResult);
+    return res.status(503).json(pendingResult);
   }
 });
 
@@ -1322,16 +1308,19 @@ app.post("/api/save-attempt", async (req, res) => {
   // authoritative signal here.
   const injectionDetected = existingAttempt?.evaluation?.integrityViolation === true;
 
-  const generationModelUsed = sessionData?.generationModelUsed || "gemini-3.5-flash";
+  const generationModelUsed = sessionData?.generationModelUsed || GEMINI_MODEL;
   const baselineBandWide = sessionData?.baselineBandWide === true;
 
+  // Historical "static-fallback" sessions predate the no-fallback design
+  // (docs/HEADROOM_MIGRATION_SPEC.md) and are kept non-comparable if any
+  // still exist; there is no longer a live-model-tier check here since
+  // there is only one pinned model to begin with.
   const comparable = !(
     generationModelUsed === "static-fallback" ||
     baselineBandWide === true ||
     judgeUnstable === true ||
     injectionDetected === true ||
-    timeExceeded === true ||
-    generationModelUsed !== "gemini-3.1-flash-lite"
+    timeExceeded === true
   );
 
   const profilePayload: any = {
@@ -1480,7 +1469,7 @@ app.get("/api/attempt/:id", async (req, res) => {
       dimensionScores: attemptData.evaluation?.dimensionScores || attemptData.dimensionScores || [],
       timestamp: attemptData.timestamp,
       rubricVersionId: attemptData.rubricVersionId,
-      judgeModelName: "gemini-3.1-pro-preview", // Pinned judge model (FIX 1.1 / 11.4)
+      judgeModelName: JUDGE_MODEL, // Pinned judge model (FIX 1.1 / 11.4)
       triageFlags: attemptData.evaluation?.triageFlags || attemptData.triageFlags || { guardrailFired: false, reason: "", capApplied: 0 },
       comparable: attemptData.comparable === true
     };
@@ -1552,7 +1541,11 @@ app.get("/api/admin/validity-report", requireAdminAuth, async (req, res) => {
     attempts = localAttempts;
   }
 
-  const comparableAttempts = attempts.filter(a => a?.comparable === true);
+  // Every report below is exactly "aggregated cognitive benchmarking
+  // statistics" -- only attempts whose person consented to that (the
+  // ConfigureScreen checkbox, optional per docs/HEADROOM_MIGRATION_SPEC.md)
+  // may feed them.
+  const comparableAttempts = attempts.filter(a => a?.comparable === true && a?.researchConsent === true);
 
   const varianceRecords = comparableAttempts
     .map(a => {
@@ -1639,8 +1632,12 @@ app.get("/api/leaderboard", async (req, res) => {
     }
   }
 
-  // Filter to comparable === true first (FIX 6.6)
-  const comparableList = list.filter(item => item.comparable === true);
+  // Filter to comparable === true, and only include attempts whose person
+  // consented to "aggregated cognitive benchmarking statistics" -- the
+  // leaderboard is exactly that, so a non-consenting attempt must not
+  // contribute to it (FIX 6.6; consent scope per the ConfigureScreen
+  // checkbox text).
+  const comparableList = list.filter(item => item.comparable === true && item.researchConsent === true);
 
   comparableList.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
   const top20 = comparableList.slice(0, 20);
@@ -1693,8 +1690,13 @@ app.get("/api/percentile", async (req, res) => {
     list = localAttempts.filter(a => a.domain === domain);
   }
 
+  // The reference pool is exactly "aggregated cognitive benchmarking
+  // statistics" -- only include attempts whose person consented to that.
+  // The requester still gets their own percentile against this pool
+  // regardless of their own consent choice; consent gates contributing
+  // data to others' statistics, not seeing your own result.
   const referenceScores = list
-    .filter(a => a.difficulty === difficulty && a.comparable === true && typeof a.score === "number")
+    .filter(a => a.difficulty === difficulty && a.comparable === true && a.researchConsent === true && typeof a.score === "number")
     .filter(a => !excludeSessionId || a.sessionId !== excludeSessionId)
     .map(a => a.score as number);
 

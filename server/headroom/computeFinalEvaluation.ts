@@ -138,6 +138,9 @@ export function computeFinalEvaluation(
   // model eras into one comparable pool.
   const executorModelMismatch = sessionData.executorModel !== EXECUTOR_MODEL;
 
+  // "static-fallback" historically marked the no-longer-existent static task
+  // fallback; kept here defensively for any such session still on record.
+  // There is no live-model-tier check -- there is only one pinned model.
   const comparable = !(
     sessionData.generationModelUsed === "static-fallback" ||
     sessionData.baselineBandWide === true ||
@@ -145,7 +148,6 @@ export function computeFinalEvaluation(
     regexInjectionSuspected === true ||
     rulingPass.integrityViolation === true ||
     timeExceeded === true ||
-    sessionData.generationModelUsed !== "gemini-3.1-flash-lite" ||
     executorModelMismatch === true
   );
 

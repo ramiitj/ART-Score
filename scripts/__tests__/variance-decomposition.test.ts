@@ -6,8 +6,8 @@ describe("toRecords", () => {
     // Two different generated sessions sharing the same domain and
     // difficulty must be treated as two different items, not one.
     const attempts = [
-      { sessionId: "session-a", userEmail: "alice@example.com", domain: "Software Engineering", difficulty: "Beginner", comparable: true, score: 40 },
-      { sessionId: "session-b", userEmail: "alice@example.com", domain: "Software Engineering", difficulty: "Beginner", comparable: true, score: 70 }
+      { sessionId: "session-a", userEmail: "alice@example.com", domain: "Software Engineering", difficulty: "Beginner", comparable: true, researchConsent: true, score: 40 },
+      { sessionId: "session-b", userEmail: "alice@example.com", domain: "Software Engineering", difficulty: "Beginner", comparable: true, researchConsent: true, score: 70 }
     ];
 
     const records = toRecords(attempts);
@@ -19,25 +19,36 @@ describe("toRecords", () => {
   });
 
   it("falls back to the export's id field when sessionId is absent", () => {
-    const attempts = [{ id: "doc-id-1", userEmail: "a@example.com", comparable: true, score: 50 }];
+    const attempts = [{ id: "doc-id-1", userEmail: "a@example.com", comparable: true, researchConsent: true, score: 50 }];
     const records = toRecords(attempts);
     expect(records[0].itemKey).toBe("doc-id-1");
   });
 
   it("excludes non-comparable attempts", () => {
     const attempts = [
-      { sessionId: "s1", userEmail: "a@example.com", comparable: false, score: 90 },
-      { sessionId: "s2", userEmail: "a@example.com", comparable: true, score: 40 }
+      { sessionId: "s1", userEmail: "a@example.com", comparable: false, researchConsent: true, score: 90 },
+      { sessionId: "s2", userEmail: "a@example.com", comparable: true, researchConsent: true, score: 40 }
     ];
     const records = toRecords(attempts);
     expect(records).toHaveLength(1);
     expect(records[0].itemKey).toBe("s2");
   });
 
+  it("excludes attempts whose person did not consent to research use, even if comparable", () => {
+    const attempts = [
+      { sessionId: "s1", userEmail: "a@example.com", comparable: true, researchConsent: false, score: 90 },
+      { sessionId: "s2", userEmail: "a@example.com", comparable: true, score: 40 }, // researchConsent absent entirely
+      { sessionId: "s3", userEmail: "a@example.com", comparable: true, researchConsent: true, score: 60 }
+    ];
+    const records = toRecords(attempts);
+    expect(records).toHaveLength(1);
+    expect(records[0].itemKey).toBe("s3");
+  });
+
   it("reads the score from evaluation.score, falling back to the top-level score field", () => {
     const attempts = [
-      { sessionId: "s1", userEmail: "a@example.com", comparable: true, evaluation: { score: 33 } },
-      { sessionId: "s2", userEmail: "a@example.com", comparable: true, score: 77 }
+      { sessionId: "s1", userEmail: "a@example.com", comparable: true, researchConsent: true, evaluation: { score: 33 } },
+      { sessionId: "s2", userEmail: "a@example.com", comparable: true, researchConsent: true, score: 77 }
     ];
     const records = toRecords(attempts);
     expect(records[0].value).toBe(33);
@@ -46,8 +57,8 @@ describe("toRecords", () => {
 
   it("skips records missing a person key or a usable score", () => {
     const attempts = [
-      { sessionId: "s1", comparable: true, score: 50 }, // no userEmail/anonymizedUserId
-      { sessionId: "s2", userEmail: "a@example.com", comparable: true, score: "not-a-number" }
+      { sessionId: "s1", comparable: true, researchConsent: true, score: 50 }, // no userEmail/anonymizedUserId
+      { sessionId: "s2", userEmail: "a@example.com", comparable: true, researchConsent: true, score: "not-a-number" }
     ];
     const records = toRecords(attempts);
     expect(records).toHaveLength(0);

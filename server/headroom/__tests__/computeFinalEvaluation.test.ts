@@ -34,7 +34,7 @@ function baseSession(overrides: Partial<any> = {}) {
     headroom: 50,
     baselineSpread: 0,
     baselineBandWide: false,
-    generationModelUsed: "gemini-3.1-flash-lite",
+    generationModelUsed: EXECUTOR_MODEL,
     executorModel: EXECUTOR_MODEL,
     timeLimit: 90,
     rubricVersionId: "v1.0.0",
@@ -274,11 +274,18 @@ describe("computeFinalEvaluation — comparable flag", () => {
     expect(result.comparable).toBe(false);
   });
 
-  it("is false when the generation model is not the pinned model", () => {
+  it("is false for a historical static-fallback session (no fallback mode exists going forward)", () => {
     const scoreResult = aggregatePasses(passes)!;
-    const session = baseSession({ generationModelUsed: "gemini-3.5-flash" });
+    const session = baseSession({ generationModelUsed: "static-fallback" });
     const result = computeFinalEvaluation(session, scoreResult, "out", PLAIN_REVISION, 30, false);
     expect(result.comparable).toBe(false);
+  });
+
+  it("stays comparable regardless of which real model generated the task, since there is only one pinned model", () => {
+    const scoreResult = aggregatePasses(passes)!;
+    const session = baseSession({ generationModelUsed: "gemini-3.1-pro-preview" });
+    const result = computeFinalEvaluation(session, scoreResult, "out", PLAIN_REVISION, 30, false);
+    expect(result.comparable).toBe(true);
   });
 
   it("is false when the session's executor model does not match the currently pinned EXECUTOR_MODEL", () => {

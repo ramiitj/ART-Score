@@ -8,18 +8,25 @@ The ART Score must be psychometrically rigorous. It should reflect real, observa
 Scoring must be domain-sensitive and follow explicit criteria.
 You must always follow the structured reasoning process defined below before giving any score.`;
 
+// The single Gemini model used for every AI call in this system -- task
+// generation, baseline/self-revision/steered execution, and judging alike.
+// One model, called via GEMINI_API_KEY, with no model-tier fallback: if a
+// call to it fails (including rate limits), the caller surfaces an honest
+// error rather than silently retrying against a different, weaker model.
+export const GEMINI_MODEL = "gemini-3.1-pro-preview";
+
 // Executor: one pinned model at one fixed temperature, used for every run that
 // must be comparable to another (baseline execution, self-revision, and the
 // human-steered execution). Pinning this means the only difference between
 // runs is the prompt, never sampling variance.
-export const EXECUTOR_MODEL = "gemini-3.5-flash";
+export const EXECUTOR_MODEL = GEMINI_MODEL;
 export const EXECUTOR_TEMPERATURE = 0;
 
 // Judge: one pinned model at temperature 0, applied identically regardless of
 // which side of a blind comparison it is scoring. Its biases (position,
 // verbosity, self-preference) are neutralized structurally via blinding and
 // randomization, not by instruction.
-export const JUDGE_MODEL = "gemini-3.1-pro-preview";
+export const JUDGE_MODEL = GEMINI_MODEL;
 export const JUDGE_TEMPERATURE = 0;
 
 // Independent judge passes per comparison; position is randomized

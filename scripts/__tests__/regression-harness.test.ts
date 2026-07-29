@@ -7,8 +7,19 @@ import { toRecords, loadAttempts } from "../regression-harness";
 describe("toRecords", () => {
   it("excludes non-comparable attempts", () => {
     const attempts = [
-      { comparable: false, score: 90, headroomShadow: { headroomScoreShadow: 0.9, validityGatePassed: true } },
-      { comparable: true, score: 40, headroomShadow: { headroomScoreShadow: 0.4, validityGatePassed: true } }
+      { comparable: false, researchConsent: true, score: 90, headroomShadow: { headroomScoreShadow: 0.9, validityGatePassed: true } },
+      { comparable: true, researchConsent: true, score: 40, headroomShadow: { headroomScoreShadow: 0.4, validityGatePassed: true } }
+    ];
+    const records = toRecords(attempts);
+    expect(records).toHaveLength(1);
+    expect(records[0].oldScore).toBe(40);
+  });
+
+  it("excludes attempts whose person did not consent to research use, even if comparable", () => {
+    const attempts = [
+      { comparable: true, researchConsent: false, score: 90, headroomShadow: { headroomScoreShadow: 0.9, validityGatePassed: true } },
+      { comparable: true, score: 50, headroomShadow: { headroomScoreShadow: 0.5, validityGatePassed: true } }, // researchConsent absent
+      { comparable: true, researchConsent: true, score: 40, headroomShadow: { headroomScoreShadow: 0.4, validityGatePassed: true } }
     ];
     const records = toRecords(attempts);
     expect(records).toHaveLength(1);
@@ -17,8 +28,8 @@ describe("toRecords", () => {
 
   it("excludes attempts with no headroomShadow computed", () => {
     const attempts = [
-      { comparable: true, score: 50, headroomShadow: null },
-      { comparable: true, score: 60, evaluation: { score: 60 } } // no headroomShadow field at all
+      { comparable: true, researchConsent: true, score: 50, headroomShadow: null },
+      { comparable: true, researchConsent: true, score: 60, evaluation: { score: 60 } } // no headroomShadow field at all
     ];
     const records = toRecords(attempts);
     expect(records).toHaveLength(0);
@@ -26,8 +37,8 @@ describe("toRecords", () => {
 
   it("reads oldScore from evaluation.score, falling back to top-level score", () => {
     const attempts = [
-      { comparable: true, evaluation: { score: 33 }, headroomShadow: { headroomScoreShadow: 0.3, validityGatePassed: true } },
-      { comparable: true, score: 77, headroomShadow: { headroomScoreShadow: 0.7, validityGatePassed: true } }
+      { comparable: true, researchConsent: true, evaluation: { score: 33 }, headroomShadow: { headroomScoreShadow: 0.3, validityGatePassed: true } },
+      { comparable: true, researchConsent: true, score: 77, headroomShadow: { headroomScoreShadow: 0.7, validityGatePassed: true } }
     ];
     const records = toRecords(attempts);
     expect(records[0].oldScore).toBe(33);
@@ -36,7 +47,7 @@ describe("toRecords", () => {
 
   it("reads validityGatePassed from headroomShadow, defaulting to false when absent", () => {
     const attempts = [
-      { comparable: true, score: 50, headroomShadow: { headroomScoreShadow: 0.5 } }
+      { comparable: true, researchConsent: true, score: 50, headroomShadow: { headroomScoreShadow: 0.5 } }
     ];
     const records = toRecords(attempts);
     expect(records[0].validityGatePassed).toBe(false);
