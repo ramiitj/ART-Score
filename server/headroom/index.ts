@@ -26,10 +26,13 @@ export { assessCeilingStability } from "./ceilingStability";
 export {
   computeElevationMonitor,
   computeObsolescenceMonitor,
+  computeVerbosityLeakageMonitor,
   MIN_SAMPLE_SIZE_FOR_ELEVATION_MONITOR,
-  MIN_SAMPLE_SIZE_PER_ERA
+  MIN_SAMPLE_SIZE_PER_ERA,
+  MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR
 } from "./validityMonitors";
 export { computeEditDistance } from "./editDistance";
+export { selectTaskArchetype } from "./archetypeSampling";
 export type { AggregatedScore, JudgePassResult, DimensionSpreads, DiffInventoryItem } from "./types";
 export type {
   GapItem,
@@ -48,5 +51,12 @@ export type { RunItemResult, RunAggregate } from "./aggregateRun";
 export type { AnchorItemPair, EquatingResult } from "./reequating";
 export type { ScoreShiftRecord, ScoreShiftReport } from "./scoreShiftReport";
 export type { CeilingStabilityResult } from "./ceilingStability";
-export type { ElevationMonitorResult, ModelEraRecord, ModelEraHeadroom, ObsolescenceMonitorResult } from "./validityMonitors";
+export type {
+  ElevationMonitorResult,
+  ModelEraRecord,
+  ModelEraHeadroom,
+  ObsolescenceMonitorResult,
+  LeakageMonitorRecord,
+  LeakageMonitorResult
+} from "./validityMonitors";
 export type { EditDistanceResult } from "./editDistance";

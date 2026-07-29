@@ -13,12 +13,16 @@ export interface HeadroomShadowResult {
   // comparison, there is no elevation to credit regardless of manifest
   // resolution (paper: "no elevation to measure" below the gate).
   //
-  // NOTE: this is a Resolution-only proxy for the new Headroom score, not the
-  // final Efficiency+Resolution composite from the migration spec (§7). The
-  // Efficiency term needs a natural edit-distance signal, which only exists
-  // once the direct-prompt-edit interaction lands (migration Phase 3) — it is
-  // deliberately not approximated here under the old revision-instructions
-  // interaction model.
+  // This is the DECIDED score shape, not an interim proxy: HeadroomScore = R,
+  // gated (docs/HEADROOM_MIGRATION_SPEC.md §7, §16.2). The Efficiency term
+  // from the original spec was dropped — R plus the validity gate carry the
+  // construct validity, while E added a gameable, unitless second dimension
+  // that depended on an uncalibratable constant. Edit magnitude is still
+  // logged, but as an input to the verbosity-leakage validity monitor (§13)
+  // rather than to the score.
+  //
+  // Consequence: cutting this over no longer waits on any calibration
+  // constant — only on real-data evidence that the instrument behaves.
   headroomScoreShadow: number;
 }
 

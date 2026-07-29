@@ -7,7 +7,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import admin from "firebase-admin";
 import dotenv from "dotenv";
 
-import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, FALLBACK_TASKS } from "./asset-data";
+import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, FALLBACK_TASKS, GENERATION_GROUND_RULES } from "./asset-data";
 import {
   MASTER_SYSTEM_PROMPT,
   maskName,
@@ -26,10 +26,12 @@ import {
   ITEMS_PER_RUN,
   assessCeilingStability,
   computeEditDistance,
+  selectTaskArchetype,
   decomposeVariance,
   computeScoreShiftReport,
   computeElevationMonitor,
-  computeObsolescenceMonitor
+  computeObsolescenceMonitor,
+  computeVerbosityLeakageMonitor
 } from "./server/headroom";
 import type { GapItem, HeadroomShadowResult, RunItemResult } from "./server/headroom";
 import {
@@ -173,7 +175,7 @@ async function getOrCreateRun(
   providedRunId: string | undefined,
   domain: string,
   difficulty: string
-): Promise<{ runId: string; itemIndex: number }> {
+): Promise<{ runId: string; itemIndex: number; usedArchetypes: string[] }> {
   const db = getFirestoreDb();
 
   if (providedRunId) {
@@ -185,7 +187,11 @@ async function getOrCreateRun(
       run = localRuns.find(r => r.runId === providedRunId);
     }
     if (run && Array.isArray(run.itemSessionIds) && run.itemSessionIds.length < ITEMS_PER_RUN) {
-      return { runId: providedRunId, itemIndex: run.itemSessionIds.length };
+      return {
+        runId: providedRunId,
+        itemIndex: run.itemSessionIds.length,
+        usedArchetypes: Array.isArray(run.usedArchetypes) ? run.usedArchetypes : []
+      };
     }
   }
 
@@ -196,6 +202,7 @@ async function getOrCreateRun(
     difficulty,
     itemsTotal: ITEMS_PER_RUN,
     itemSessionIds: [] as string[],
+    usedArchetypes: [] as string[], // §6: archetypes already drawn in this run, for sampling without replacement
     createdAt: new Date().toISOString(),
     status: "in_progress"
   };
@@ -204,18 +211,22 @@ async function getOrCreateRun(
   } else {
     localRuns.push(runRecord);
   }
-  return { runId, itemIndex: 0 };
+  return { runId, itemIndex: 0, usedArchetypes: [] };
 }
 
-async function appendSessionToRun(runId: string, sessionId: string) {
+async function appendSessionToRun(runId: string, sessionId: string, taskArchetype: string) {
   const db = getFirestoreDb();
   if (db !== null) {
     await db.collection("testRuns").doc(runId).update({
-      itemSessionIds: admin.firestore.FieldValue.arrayUnion(sessionId)
+      itemSessionIds: admin.firestore.FieldValue.arrayUnion(sessionId),
+      usedArchetypes: admin.firestore.FieldValue.arrayUnion(taskArchetype)
     });
   } else {
     const run = localRuns.find(r => r.runId === runId);
-    if (run) run.itemSessionIds.push(sessionId);
+    if (run) {
+      run.itemSessionIds.push(sessionId);
+      if (!run.usedArchetypes.includes(taskArchetype)) run.usedArchetypes.push(taskArchetype);
+    }
   }
 }
 
@@ -562,7 +573,7 @@ app.post("/api/generate-task", generateTaskLimiter, async (req, res) => {
   const defaultTime = diffDef.timeBudget || 120;
 
   try {
-    const { runId, itemIndex } = await getOrCreateRun(providedRunId, domain, difficulty);
+    const { runId, itemIndex, usedArchetypes } = await getOrCreateRun(providedRunId, domain, difficulty);
     const ai = getGeminiClient();
     const activePrompt = await getActiveSystemPrompt();
 
@@ -578,11 +589,19 @@ app.post("/api/generate-task", generateTaskLimiter, async (req, res) => {
 
     let bestCandidate: any = null;
 
+    // Sample the task archetype ONCE per item, before the quality-band retry
+    // loop -- a retry exists to land the baseline in the target difficulty
+    // band, not to change what kind of task this item is. Sampling is without
+    // replacement across the run (§6): the 3 items in a sitting draw distinct
+    // archetypes where the pool allows, so a person's repeated measures span
+    // genuinely different tasks rather than three near-duplicates.
+    const archetypePool: string[] = roleProfile.taskArchetypes[difficulty as keyof typeof roleProfile.taskArchetypes]
+      || Object.values(roleProfile.taskArchetypes)[0];
+    const taskArchetype = selectTaskArchetype(archetypePool, usedArchetypes) || archetypePool[0];
+
     // Attempt generation & pre-scoring up to 4 times to fit the 48-52 narrow band (FIX 7)
     for (let attemptNum = 1; attemptNum <= 4; attemptNum++) {
       console.log(`Generating task & baseline prompt (Attempt ${attemptNum}/4)...`);
-
-      const taskArchetype = roleProfile.taskArchetypes[difficulty as keyof typeof roleProfile.taskArchetypes]?.[Math.floor(Math.random() * roleProfile.taskArchetypes[difficulty as keyof typeof roleProfile.taskArchetypes].length)] || Object.values(roleProfile.taskArchetypes)[0][0];
 
       const prompt = `Part 1: Task & Baseline Prompt Generation with Metadata
 You are acting as the following professional persona:
@@ -595,7 +614,7 @@ Generate a realistic, high-stakes knowledge work task based on this archetype: "
 
 DIFFICULTY LEVEL: ${difficulty}
 Cognitive Load: ${diffDef.cognitiveLoad}
-Failure Mode Shape: ${diffDef.failureModeShape}
+Improvement Shape: ${diffDef.improvementShape}
 Scenario Complexity: ${diffDef.scenarioComplexity}
 
 REQUIRED DOMAIN ELEMENTS (Must include at least two):
@@ -604,8 +623,11 @@ ${roleProfile.requiredElements.map(e => "- " + e).join("\n")}
 ANTI-PATTERNS TO AVOID:
 ${roleProfile.antiPatterns.map(e => "- " + e).join("\n")}
 
+GROUND RULES (apply to every generated item, without exception):
+${GENERATION_GROUND_RULES.map(e => "- " + e).join("\n")}
+
 BASELINE PROMPT REQUIREMENT:
-Write the prompt a knowledge worker would realistically give an AI assistant to accomplish this task in one shot. The prompt itself, when executed, must produce a response that is competent but improvable — good enough to be used in real work, but with clear room to add depth, specificity, structure, actionability, or domain rigor. Do not describe, name, or hint at any specific flaw; just write a natural, realistic first-attempt prompt.
+Write the prompt a knowledge worker would realistically give an AI assistant to accomplish this task in one shot. The prompt itself, when executed, must produce a response that is competent but improvable — good enough to be used in real work, but with clear room to add depth, specificity, structure, actionability, or domain rigor. Do not plant a flaw, and do not describe, name, or hint at what is missing; just write a natural, realistic first-attempt prompt. The room to improve must come from what such a prompt naturally leaves unsaid.
 
 CRITICAL FORMATTING RULES:
 1. Absolutely DO NOT output any asterisks (* or **), hashes (#), or markdown syntax. For headings, use simple capital letters or standard paragraph breaks.
@@ -809,7 +831,8 @@ Elements Included: [Brief description of the domain-specific elements included]
       createdAt: new Date().toISOString(),
       status: "active",
       runId, // Headroom migration §11: groups this item with its sibling items in the same run
-      itemIndex
+      itemIndex,
+      taskArchetype // Headroom migration §6: which archetype this item was drawn from, for coverage analysis
     };
 
     const db = getFirestoreDb();
@@ -818,7 +841,7 @@ Elements Included: [Brief description of the domain-specific elements included]
     } else {
       localSessions.push(sessionRecord);
     }
-    await appendSessionToRun(runId, sessionId);
+    await appendSessionToRun(runId, sessionId, taskArchetype);
 
     // Return sanitized task payload to client. baselinePrompt is what the
     // person edits directly — unlike gapManifest, it is meant to be seen.
@@ -1564,6 +1587,18 @@ app.get("/api/admin/validity-report", requireAdminAuth, async (req, res) => {
     })
     .filter((r): r is { model: string; headroomScoreShadow: number; timestamp: string } => r !== null);
 
+  // Verbosity-leakage check (§13): does edit magnitude predict Resolution?
+  // Needs both signals present, so it only covers attempts scored after
+  // edit-distance logging landed.
+  const leakageRecords = comparableAttempts
+    .map(a => {
+      const resolution = a?.headroomShadow?.resolution;
+      const editDistanceNorm = a?.editDistanceNorm;
+      if (typeof resolution !== "number" || typeof editDistanceNorm !== "number") return null;
+      return { resolution, editDistanceNorm };
+    })
+    .filter((r): r is { resolution: number; editDistanceNorm: number } => r !== null);
+
   res.json({
     generatedAt: new Date().toISOString(),
     attemptsAnalyzed: attempts.length,
@@ -1571,7 +1606,8 @@ app.get("/api/admin/validity-report", requireAdminAuth, async (req, res) => {
     varianceDecomposition: decomposeVariance(varianceRecords),
     scoreShift: computeScoreShiftReport(scoreShiftRecords),
     elevationMonitor: computeElevationMonitor(pSteeredValues),
-    obsolescenceMonitor: computeObsolescenceMonitor(modelEraRecords)
+    obsolescenceMonitor: computeObsolescenceMonitor(modelEraRecords),
+    verbosityLeakageMonitor: computeVerbosityLeakageMonitor(leakageRecords)
   });
 });
 

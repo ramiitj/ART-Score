@@ -308,7 +308,18 @@ const GENERATOR_SCHEMA = {
 
 **Critical:** the manifest is generated **before the person acts** and is **never sent to the client** — it is the a-priori criterion that fixes what counts as improvement independently of the judge's momentary impression (paper p.9). Strip it from every client-facing response and from the public `/api/attempt/:id` whitelist.
 
-> **Preferred:** generate + SME-review + pilot items **offline** into a calibrated bank and serve from it (removes generation latency/cost from the request path and lets us calibrate item difficulty). Live generation stays as a labeled `comparable=false` fallback.
+> **DECISION (supersedes the calibrated item bank): constrained generation from explicit ground rules.**
+>
+> The originally specced hand-curated item bank (generate → SME-review → pilot → serve from a fixed set) is **not being built**. Instead, every item is a **draw from a defined population** of admissible items, constrained by three layers of ground rules:
+> 1. `ROLE_PROFILES[domain]` — persona, task archetypes (per difficulty), required elements, anti-patterns.
+> 2. `DIFFICULTY_DEFINITIONS[difficulty]` — cognitive load, improvement shape, scenario complexity.
+> 3. `GENERATION_GROUND_RULES` — cross-domain invariants that hold for every draw (no planted flaws, no real named entities, symbolic/analytic scope, genuine stakes, competent-but-improvable baseline).
+>
+> This is domain-sampling: items are exchangeable draws from a universe of admissible observations, so what gets calibrated is the *generator's distribution* rather than each individual item. **Honest tradeoff:** you cannot calibrate or reuse a specific item's difficulty the way a fixed bank lets you, and per-item difficulty variance stays higher. What holds the distribution in range instead is the 48–52 baseline pre-scoring band loop — which makes that loop load-bearing calibration machinery, not the legacy artifact §14 once treated it as. The upside is no curation bottleneck, no stale bank, and an effectively unbounded item pool.
+>
+> **Sampling without replacement within a run** (`selectTaskArchetype()`): the 3 items in one sitting draw distinct archetypes where the pool allows, and the run record tracks `usedArchetypes`. Three near-duplicate items would inflate within-person consistency for reasons unrelated to the person, corrupting the person × item variance decomposition (§11).
+>
+> **Note on `comparable`:** because there is no bank, the §8 "served from live fallback (not calibrated bank) ⇒ `comparable = false`" rule does not apply — live generation *is* the intended path, not a degraded one. The static `FALLBACK_TASKS` path (used only when generation fails outright) remains `comparable = false`.
 
 ---
 
@@ -359,6 +370,21 @@ function computeHeadroom(session, paired, resolution): HeadroomScore {
   return { headroomScore, R, E, headroomSE: paired.se, gate: true };
 }
 ```
+
+> **DECISION (supersedes the `0.5·R + 0.5·E` formula above): the shipped score is `R`, gated.**
+> ```
+> HeadroomScore = R    if the validity gate passes
+>               = 0    otherwise
+> ```
+> `E` is **not** part of the score. Rationale: `R` and the validity gate already carry essentially all of the construct validity — criterion-referenced closure of gaps fixed before the person acted, gated on genuinely beating the model's own self-revision. `E` added a second, noisier dimension on top: change magnitude is gameable (surface edits vs. real conceptual ones), and `E` has no natural unit, so "0.65" is uninterpretable without knowing `K_EFFICIENCY`. `R` reads plainly as "closed 5 of the 8 gaps the model could not close itself" with no calibration constant at all.
+>
+> Two consequences worth stating explicitly:
+> 1. **Cutover is no longer blocked on `K_EFFICIENCY`.** That constant was the single hard blocker on Phase 4; a gate-then-`R` score needs no calibration constant, so cutover now depends only on the regression harness and elevation monitor checking out against real data.
+> 2. **Edit distance becomes a validity check, not a scoring input** (§13, verbosity-leakage monitor). A longer rewrite gives the manifest-resolution judge more surface area to find something that plausibly addresses each gap — that would be verbosity bias re-entering through the resolution check, which the a-priori manifest exists to prevent. If edit magnitude predicts `R`, that is a *judge calibration defect* to investigate, not something a scoring constant should silently cancel out. Tuning `K_EFFICIENCY` to absorb it would fix the symptom at the wrong layer.
+>
+> `E` may be reintroduced later — as a displayed diagnostic ("surgical vs. brute-force"), or into the score itself — but only if real data shows edit magnitude carries signal that `R` and the gate miss.
+
+The `K_EFFICIENCY` note below is retained for context, and applies only if `E` is ever reintroduced:
 
 `K_EFFICIENCY` and the edit-distance normalization are **calibration constants** — set them empirically on the pilot sample, not by intuition (this is the replacement for the magic caps 25/20/74). Report `headroomScore` with `headroomSE`; never a bare number.
 
@@ -429,6 +455,7 @@ Bake the paper's falsifiability conditions in as live checks, not one-off studie
 
 - **Elevation monitor — implemented, reachable two ways.** `computeElevationMonitor()` (`server/headroom/validityMonitors.ts`) reports the mean `pSteered` (rate at which steered beats self-revised in blind paired comparison) across comparable attempts, flagging `atOrNearChance` once sample size is sufficient (`MIN_SAMPLE_SIZE_FOR_ELEVATION_MONITOR = 20`) and the mean sits at or below 0.55. Reachable via `npx tsx scripts/validity-monitors.ts <attempts-export.json>` (`npm run analyze:validity`) against an export, or live via `GET /api/admin/validity-report` (admin-key gated) against the current attempts collection directly — no manual export step needed. Still not a scheduled/alerting check — that needs a notification channel, which doesn't exist yet.
 - **Obsolescence monitor — implemented, reachable the same two ways.** `computeObsolescenceMonitor()` groups attempts by `executorModel`, computes each era's mean `headroomScoreShadow`, and flags `possibleObsolescence` when the most recent sufficiently-sampled era (`MIN_SAMPLE_SIZE_PER_ERA = 20`) collapses toward zero (≤0.1) after an earlier era showed meaningful Headroom (≥0.2). No real model transition has occurred yet in this system's data to actually trigger this.
+- **Verbosity-leakage monitor — implemented** (`computeVerbosityLeakageMonitor()`, same module and both surfaces). Correlates `editDistanceNorm` against `R` across comparable attempts and flags `possibleLeakage` at r ≥ 0.5 with n ≥ 20. Resolution is *supposed* to be independent of how much text the person wrote; if bigger edits systematically raise `R`, the manifest-resolution judge is likely rewarding volume rather than genuine gap closure. **The correct response is to fix the judge, not to add a compensating term to the score** — this is precisely why edit magnitude is a validity check here rather than the Efficiency scoring input it was originally specced as (§7, §16.2). Some positive correlation is expected and legitimate (closing more gaps usually does take more words), so the flag means "investigate", never "proven biased".
 - **Validation battery hooks:** optional post-test measures to establish convergent/discriminant validity — positive-but-imperfect correlation with evaluative expertise (Amabile CAT), relation to domain knowledge, and near-independence from Need for Cognition. Not started — this needs a product decision on what post-test instrument to administer and to whom.
 
 ---
@@ -445,7 +472,7 @@ Bake the paper's falsifiability conditions in as live checks, not one-off studie
 
 **Phase 3 — Generator v2 + direct edit. ✅** UI edits the baseline prompt directly; Generator emits `gapManifest`; flaw injection (`FAILURE_MODES`, `flawsInjected`, `primaryFailureMode`) fully retired.
 
-**Phase 4 — Cutover. ⚠️ Partial, deliberately held.** Percentile/distributional reporting, scope banner, and variance decomposition (`scripts/variance-decomposition.ts`) shipped. The actual score cutover has **not** happened: `K_EFFICIENCY` (§16.2) still needs pilot calibration against real usage data that doesn't exist yet, so `headroomShadow` stays shadow-only and the legacy composite is still what's surfaced. §10's deletions (C2–C5 guardrails, `headroomEfficiencyScore`/`rawDelta` composite) are blocked on this same cutover — deleting them now would break live scoring.
+**Phase 4 — Cutover. ⚠️ Partial, held — but no longer blocked on calibration.** Percentile/distributional reporting, scope banner, and variance decomposition (`scripts/variance-decomposition.ts`) shipped. The score cutover has **not** happened yet, but the blocker changed: dropping the Efficiency term (§7, §16.2) removed the `K_EFFICIENCY` calibration dependency entirely, and the shipped shadow score `headroomShadow.headroomScoreShadow` **already computes exactly the decided shape** (gate-then-`R`) — it was never an interim approximation. What remains before flipping is evidence, not code: run the regression harness and elevation monitor against real attempts and confirm the instrument behaves (real elevation above chance, sane score-shift distribution, non-trivial person variance). §10's deletions (C2–C5 guardrails, `headroomEfficiencyScore`/`rawDelta` composite) follow the flip — deleting them before it would break live scoring.
 
 **Phase 4b — Multi-item sessions + person-vs-task validation (§11). ✅** `ITEMS_PER_RUN = 3`; `testRuns` collection; `GET /api/run/:runId`; App.tsx runs a real 3-item loop per session (headless `save-attempt` for non-final items so every item's attempt carries the person's identity). `scripts/variance-decomposition.ts`'s `sessionId`-keyed item identity (fixed pre-existing bug) now receives genuine repeated-measures data from real multi-item runs.
 
@@ -465,7 +492,7 @@ Bake the paper's falsifiability conditions in as live checks, not one-off studie
 ## 16. Open decisions
 
 1. **Frontier anchor — RESOLVED: manifest-complete.** `aggregateManifestResolution()` (`server/headroom/manifestMath.ts`) already implements this: `closable` = manifest gaps the self-revised ceiling does not already resolve, and `resolution = resolvedCount / closableCount` over exactly that closable set. No scaffolded strong-model exemplar path exists or is planned.
-2. **`K_EFFICIENCY`** and edit-distance normalization: still pending — requires pilot calibration against real usage data, which does not yet exist. This is the one remaining hard blocker on the Phase 4 cutover (§14).
+2. **`K_EFFICIENCY` — RESOLVED: not needed.** The Efficiency term was dropped from the score (§7): `HeadroomScore = R`, gated. `R` and the validity gate carry the construct validity; `E` added a gameable, unitless second dimension whose interpretation depended entirely on a constant nobody could calibrate yet. **This unblocks the Phase 4 cutover** — it was previously the one hard blocker. Edit distance is still logged, but now feeds the verbosity-leakage validity monitor (§13) rather than the score. Reintroducing `E` remains open, contingent on real data showing it carries signal `R` and the gate miss.
 3. **Items per session — RESOLVED: 3.** Implemented via `ITEMS_PER_RUN` (`server/headroom/constants.ts`), the `testRuns` collection, `GET /api/run/:runId`, and the App.tsx run loop (§11).
 4. **Domain pruning — RESOLVED: 7 of the original 13.** Kept: General Knowledge Work, Software Engineering, Product Management, Data Analysis, Finance, Legal, Consulting & Strategy. Pruned: Marketing, Sales, Human Resources, Business Operations, Content & Communications, Customer Support — either explicitly flagged by the paper as relationship-heavy (Sales, Customer Support) or leaning interpersonal/persuasive/generic rather than analytic-correctness-bearing (Human Resources, Marketing, Business Operations, Content & Communications). See `src/types.ts` `DOMAINS`.
 5. **Judge model pinning + re-equating policy — RESOLVED (mechanism), pending real transition.** `computeFinalEvaluation()` now excludes an attempt from `comparable` whenever `sessionData.executorModel` no longer matches the currently pinned `EXECUTOR_MODEL` (`executorModelMismatch`), and every attempt records both `executorModel` and `judgeModel` at scoring time. `server/headroom/reequating.ts` + `scripts/judge-reequate.ts` compute the anchor-item equating offset (mean new-model-score minus old-model-score across a shared item set) once such a set exists — per the paper's anchor-item design, producing that set is a deliberate offline calibration exercise (re-run a shared item bank subset through both model eras), not something that happens automatically in the attempts stream today.

@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   computeElevationMonitor,
   computeObsolescenceMonitor,
+  computeVerbosityLeakageMonitor,
   MIN_SAMPLE_SIZE_FOR_ELEVATION_MONITOR,
-  MIN_SAMPLE_SIZE_PER_ERA
+  MIN_SAMPLE_SIZE_PER_ERA,
+  MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR
 } from "../validityMonitors";
-import type { ModelEraRecord } from "../validityMonitors";
+import type { ModelEraRecord, LeakageMonitorRecord } from "../validityMonitors";
 
 describe("computeElevationMonitor", () => {
   it("returns an empty/null result for zero values", () => {
@@ -108,3 +110,74 @@ describe("computeObsolescenceMonitor", () => {
     expect(result.possibleObsolescence).toBe(false);
   });
 });
+
+describe("computeVerbosityLeakageMonitor", () => {
+  function pairs(n: number, fn: (i: number) => LeakageMonitorRecord): LeakageMonitorRecord[] {
+    return Array.from({ length: n }, (_, i) => fn(i));
+  }
+
+  it("returns a null correlation and no flag for an empty record set", () => {
+    const result = computeVerbosityLeakageMonitor([]);
+    expect(result.n).toBe(0);
+    expect(result.correlation).toBeNull();
+    expect(result.possibleLeakage).toBe(false);
+  });
+
+  it("detects a strong positive correlation between edit magnitude and resolution", () => {
+    // R rises in lockstep with edit size -- exactly the leakage pattern.
+    const records = pairs(MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR, i => ({
+      editDistanceNorm: i / MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR,
+      resolution: i / MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR
+    }));
+    const result = computeVerbosityLeakageMonitor(records);
+    expect(result.correlation).toBeCloseTo(1, 5);
+    expect(result.possibleLeakage).toBe(true);
+  });
+
+  it("does not flag when resolution is independent of edit magnitude", () => {
+    // Alternating R with steadily rising edit size -> near-zero correlation.
+    const records = pairs(MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR, i => ({
+      editDistanceNorm: i / MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR,
+      resolution: i % 2 === 0 ? 0.4 : 0.6
+    }));
+    const result = computeVerbosityLeakageMonitor(records);
+    expect(Math.abs(result.correlation!)).toBeLessThan(SUSPICIOUS_FOR_TEST);
+    expect(result.possibleLeakage).toBe(false);
+  });
+
+  it("does not flag below the minimum sample size even with a perfect correlation", () => {
+    const records = pairs(MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR - 1, i => ({
+      editDistanceNorm: i / 10,
+      resolution: i / 10
+    }));
+    const result = computeVerbosityLeakageMonitor(records);
+    expect(result.correlation).toBeCloseTo(1, 5);
+    expect(result.sufficientSample).toBe(false);
+    expect(result.possibleLeakage).toBe(false);
+  });
+
+  it("does not flag a strong NEGATIVE correlation (smaller edits closing more gaps is not leakage)", () => {
+    const records = pairs(MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR, i => ({
+      editDistanceNorm: i / MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR,
+      resolution: 1 - i / MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR
+    }));
+    const result = computeVerbosityLeakageMonitor(records);
+    expect(result.correlation).toBeCloseTo(-1, 5);
+    expect(result.possibleLeakage).toBe(false);
+  });
+
+  it("returns a null correlation when edit magnitude has no variance", () => {
+    const records = pairs(MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR, i => ({
+      editDistanceNorm: 0.5,
+      resolution: i / MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR
+    }));
+    const result = computeVerbosityLeakageMonitor(records);
+    expect(result.correlation).toBeNull();
+    expect(result.possibleLeakage).toBe(false);
+  });
+});
+
+// Mirrors the module's private SUSPICIOUS_LEAKAGE_CORRELATION threshold; kept
+// local so the test asserts against an explicit number rather than importing
+// an internal constant.
+const SUSPICIOUS_FOR_TEST = 0.5;

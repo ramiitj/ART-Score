@@ -1,23 +1,45 @@
+// Difficulty ground rules. These constrain how hard it is to ELEVATE a
+// competent baseline, not how hard it is to spot an injected defect --
+// the flaw-injection design these once described was retired in Phase 3
+// (docs/HEADROOM_MIGRATION_SPEC.md §0). Wording here is fed verbatim into
+// the generator prompt, so it must never ask for embedded failure modes:
+// the baseline is meant to be genuinely competent, with the room for
+// improvement emergent rather than planted.
 export const DIFFICULTY_DEFINITIONS = {
   "Beginner": {
-    cognitiveLoad: "The flaw is visible on careful reading. A working professional spots it within seconds. The diagnostic move is recognition, not inference.",
-    failureModeShape: "One primary failure mode, prominently embedded. The fix is clear once the flaw is recognized.",
+    cognitiveLoad: "The room to improve is apparent on careful reading. A working professional sees what a stronger response would add within seconds. The move is recognition, not inference.",
+    improvementShape: "One dominant dimension of improvement. What excellence would add is clear once the gap is recognized.",
     scenarioComplexity: "Single stakeholder or audience. One decision or deliverable. 200–350 token baseline.",
     timeBudget: 90
   },
   "Intermediate": {
-    cognitiveLoad: "The flaw is visible only with domain framing. The professional actively examines for what is missing rather than what is wrong. The diagnostic move involves identifying absences and weak assumptions.",
-    failureModeShape: "One primary failure mode plus one secondary issue. The fix requires the user to introduce structure or constraints the baseline lacks.",
+    cognitiveLoad: "The room to improve is visible only with domain framing. The professional actively examines what is missing rather than what is wrong. The move involves identifying absences and unstated assumptions.",
+    improvementShape: "One dominant improvement dimension plus one secondary. Elevating the response requires introducing structure or constraints the baseline prompt never asked for.",
     scenarioComplexity: "Multiple stakeholders or competing considerations. A decision with non-obvious tradeoffs. 350–550 token baseline.",
     timeBudget: 120
   },
   "Advanced": {
-    cognitiveLoad: "The flaw is defensible-looking but substantively flawed. The baseline reads like competent senior-level work; the issue is methodological, structural, or involves second-order consequences.",
-    failureModeShape: "One subtle primary failure mode plus two minor issues that compound. The fix requires reframing or surfacing assumptions, not just adding content.",
+    cognitiveLoad: "The baseline reads like competent senior-level work and is defensible as-is. What a stronger response adds is methodological, structural, or second-order.",
+    improvementShape: "One subtle dominant dimension plus two minor ones that compound. Elevating the response requires reframing or surfacing assumptions, not just adding content.",
     scenarioComplexity: "Multiple stakeholders with conflicting interests. High stakes, ambiguous right answer. 550–800 token baseline.",
     timeBudget: 180
   }
 };
+
+// Cross-domain generation ground rules (docs/HEADROOM_MIGRATION_SPEC.md §6).
+// Every generated item is a draw from the population of items admissible
+// under these rules plus the domain's ROLE_PROFILES entry and the difficulty
+// definition above -- this constrained-sampling design replaces the
+// originally specced hand-curated item bank. Invariants that must hold for
+// EVERY draw regardless of domain or difficulty live here.
+export const GENERATION_GROUND_RULES = [
+  "The baseline prompt must be one a real professional would plausibly type in one shot -- natural and underspecified, never deliberately sabotaged.",
+  "The baseline prompt must not contain planted errors, contradictions, or hints about what is missing from it.",
+  "The task must be resolvable through symbolic and analytic work alone -- no embodied, relational, or accountability-bearing judgment as the core of the task.",
+  "No real named companies, real named people, live matters, or real financial figures.",
+  "The task must have genuine stakes and a specific audience; no generic 'make this professional' framing.",
+  "There must be real room to elevate the response, but the baseline must still be usable as-is in real work."
+];
 
 export const ROLE_PROFILES = {
   "General Knowledge Work": {

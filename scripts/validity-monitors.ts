@@ -22,10 +22,12 @@ import { readFileSync } from "fs";
 import {
   computeElevationMonitor,
   computeObsolescenceMonitor,
+  computeVerbosityLeakageMonitor,
   MIN_SAMPLE_SIZE_FOR_ELEVATION_MONITOR,
-  MIN_SAMPLE_SIZE_PER_ERA
+  MIN_SAMPLE_SIZE_PER_ERA,
+  MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR
 } from "../server/headroom/validityMonitors";
-import type { ModelEraRecord } from "../server/headroom/validityMonitors";
+import type { ModelEraRecord, LeakageMonitorRecord } from "../server/headroom/validityMonitors";
 
 export function loadAttempts(filePath: string): any[] {
   const raw = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -42,6 +44,18 @@ export function toPSteeredValues(attempts: any[]): number[] {
     if (typeof pSteered === "number" && !Number.isNaN(pSteered)) values.push(pSteered);
   }
   return values;
+}
+
+export function toLeakageRecords(attempts: any[]): LeakageMonitorRecord[] {
+  const records: LeakageMonitorRecord[] = [];
+  for (const a of attempts) {
+    if (a?.comparable !== true) continue;
+    const resolution = a?.headroomShadow?.resolution;
+    const editDistanceNorm = a?.editDistanceNorm;
+    if (typeof resolution !== "number" || typeof editDistanceNorm !== "number") continue;
+    records.push({ resolution, editDistanceNorm });
+  }
+  return records;
 }
 
 export function toModelEraRecords(attempts: any[]): ModelEraRecord[] {
@@ -97,6 +111,23 @@ function main() {
       console.log("ALERT: the most recent sufficiently-sampled model era shows near-zero Headroom after an earlier era showed meaningful Headroom -- possible instrument obsolescence (continual learning solved). See docs/HEADROOM_MIGRATION_SPEC.md §13.");
     } else {
       console.log("No obsolescence signal detected.");
+    }
+  }
+  console.log("");
+
+  const leakage = computeVerbosityLeakageMonitor(toLeakageRecords(attempts));
+  console.log("=== Verbosity-Leakage Monitor ===");
+  console.log(`Attempts with both a Resolution and an edit-distance signal: ${leakage.n}`);
+  if (leakage.correlation === null) {
+    console.log("Correlation undefined (too few attempts, or no variance in edit magnitude).");
+  } else {
+    console.log(`Correlation (edit magnitude vs Resolution): ${leakage.correlation.toFixed(3)}`);
+    if (!leakage.sufficientSample) {
+      console.log(`WARNING: fewer than ${MIN_SAMPLE_SIZE_FOR_LEAKAGE_MONITOR} attempts -- not yet reliable.`);
+    } else if (leakage.possibleLeakage) {
+      console.log("ALERT: larger edits are strongly associated with higher Resolution. Resolution is meant to be independent of edit size, so this suggests the manifest-resolution judge may be rewarding volume rather than genuine gap closure. Investigate the judge, not the score formula. See docs/HEADROOM_MIGRATION_SPEC.md §13.");
+    } else {
+      console.log("No verbosity-leakage signal detected.");
     }
   }
 }
