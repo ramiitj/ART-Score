@@ -8,6 +8,7 @@ import admin from "firebase-admin";
 import dotenv from "dotenv";
 
 import { DIFFICULTY_DEFINITIONS, ROLE_PROFILES, GENERATION_GROUND_RULES } from "./asset-data";
+import { buildCollectionName, validateCollectionPrefix } from "./server/db/collectionName";
 import {
   MASTER_SYSTEM_PROMPT,
   maskName,
@@ -113,6 +114,18 @@ const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 // security rules as server code should) rather than the client/web SDK --
 // the web SDK was never appropriate here since this runs with full trust,
 // not as an end-user client subject to Firestore security rules.
+// Namespaces every collection name so two deployments (e.g. the original
+// ART-Score and artscore1) can share one Firebase project without their data
+// intermingling -- see server/db/collectionName.ts. Every call site in this
+// file reaches Firestore only through db.collection(...), so wrapping that
+// one method here covers all of them; nothing below needs to know the
+// prefix exists.
+const FIRESTORE_COLLECTION_PREFIX = process.env.FIRESTORE_COLLECTION_PREFIX || "";
+validateCollectionPrefix(FIRESTORE_COLLECTION_PREFIX);
+if (FIRESTORE_COLLECTION_PREFIX) {
+  console.log(`Firestore collections namespaced with prefix: "${FIRESTORE_COLLECTION_PREFIX}"`);
+}
+
 let firestoreDb: any = null;
 
 function getFirestoreDb() {
@@ -135,7 +148,10 @@ function getFirestoreDb() {
         })
       });
     }
-    firestoreDb = admin.firestore();
+    const rawDb = admin.firestore();
+    firestoreDb = {
+      collection: (name: string) => rawDb.collection(buildCollectionName(name as any, FIRESTORE_COLLECTION_PREFIX))
+    };
     console.log("🚀 Firebase Admin SDK/Firestore successfully initialized on server!");
     return firestoreDb;
   } catch (error) {
