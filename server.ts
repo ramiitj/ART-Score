@@ -94,6 +94,20 @@ const evaluateRevisionLimiter = rateLimit({
   message: { error: "Too many evaluation requests from this address. Please wait and try again." }
 });
 
+// Admin sign-in is a credential-guessing target, so it is rate limited harder
+// than the scoring endpoints.
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many sign-in attempts. Please wait and try again." }
+});
+
+// Optional second factor on admin sign-in. When set, the submitted email must
+// match it as well as the key; when unset, only the key is checked.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+
 // Lazy-loaded firebase initialization. Server-side code talks to Firestore
 // through firebase-admin (service-account credentials, bypasses client
 // security rules as server code should) rather than the client/web SDK --
@@ -256,11 +270,14 @@ function requireAdminAuth(req: express.Request, res: express.Response, next: exp
 // only its fingerprint -- so access to rubric changes and PII exports is
 // attributable after the fact (Headroom migration Phase 5).
 async function recordAdminAudit(action: string, req: express.Request) {
-  const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+  // Defensive: writing an audit entry is a side effect, and Express 4 does
+  // not catch throws from async handlers -- so an error in here would take
+  // the whole process down rather than fail one request. Never throw.
+  const rawIp = req?.headers?.["x-forwarded-for"] || req?.socket?.remoteAddress || "";
   const entry = {
     action,
     timestamp: new Date().toISOString(),
-    keyFingerprint: (req as any).adminKeyFingerprint || "unknown",
+    keyFingerprint: (req as any)?.adminKeyFingerprint || "unknown",
     ip: String(rawIp).split(",")[0].trim()
   };
 
@@ -1495,6 +1512,42 @@ app.get("/api/attempt/:id", async (req, res) => {
 });
 
 // Admin Endpoint: secure download master dataset (Admin secured)
+// Admin sign-in. The password IS the admin key: it is checked against
+// ADMIN_KEYS server-side with the same constant-time comparison every other
+// admin route uses, so no credential is ever shipped to the browser.
+//
+// This replaces a client-side check that compared against an email and
+// password hardcoded in the React component -- which meant the real password
+// was readable in the public JS bundle by anyone who loaded the site, and
+// "authentication" was a React state flag anyone could flip in devtools. The
+// server is the only trust boundary now.
+app.post("/api/admin/login", adminLoginLimiter, async (req, res) => {
+  const { email, password } = req.body || {};
+
+  if (ADMIN_KEYS.length === 0) {
+    return res.status(503).json({
+      error: "Admin access is not configured on this deployment. Set the ADMIN_KEYS environment variable."
+    });
+  }
+
+  const emailOk = ADMIN_EMAIL === "" || String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
+  const keyOk = isValidAdminKey(typeof password === "string" ? password : undefined, ADMIN_KEYS);
+
+  // Deliberately one message for both failure modes: distinguishing "wrong
+  // email" from "wrong password" tells an attacker which half they got right.
+  if (!emailOk || !keyOk) {
+    console.warn("[Admin] Failed sign-in attempt.");
+    return res.status(401).json({ error: "Invalid credentials." });
+  }
+
+  // Attach the fingerprint to the real req rather than spreading it: an
+  // Express request's `headers`/`socket` do not survive an object spread, and
+  // recordAdminAudit reads both.
+  (req as any).adminKeyFingerprint = fingerprintAdminKey(password);
+  await recordAdminAudit("admin:sign-in", req);
+  return res.json({ ok: true });
+});
+
 app.get("/api/admin/attempts", requireAdminAuth, async (req, res) => {
   await recordAdminAudit("admin-attempts:export", req);
   const db = getFirestoreDb();
