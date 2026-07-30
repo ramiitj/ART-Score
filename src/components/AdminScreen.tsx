@@ -10,11 +10,19 @@ interface AdminScreenProps {
 }
 
 export default function AdminScreen({ onBack }: AdminScreenProps) {
-  // Login credentials
+  // Login credentials. The password doubles as the admin API key: it is
+  // verified server-side and then sent as X-Admin-Key on each admin request.
+  // It is held in memory only -- never localStorage, so it does not outlive
+  // the tab or survive into another session.
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [adminKey, setAdminKey] = useState("");
   const [errorLogin, setErrorLogin] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [auditLog, setAuditLog] = useState<any[]>([]);
+  const [validityReport, setValidityReport] = useState<any | null>(null);
 
   // Administrative stats
   const [activePrompt, setActivePrompt] = useState("");
@@ -28,26 +36,48 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
   // Expandable row state
   const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(null);
 
-  // Fetch configs
+  // Every admin route is guarded by requireAdminAuth server-side, so each
+  // request must carry the key. These fetches previously sent no header at
+  // all, so they 401'd and the dashboard silently rendered empty.
+  const authHeaders = (extra: Record<string, string> = {}) => ({
+    "X-Admin-Key": adminKey,
+    ...extra,
+  });
+
   const loadAdminData = async () => {
     setLoadingAttempts(true);
+    setLoadError("");
     try {
-      // 1. Fetch prompt
-      const promptRes = await fetch("/api/system-prompt");
+      const [promptRes, attemptsRes, auditRes, validityRes] = await Promise.all([
+        fetch("/api/system-prompt", { headers: authHeaders() }),
+        fetch("/api/admin/attempts", { headers: authHeaders() }),
+        fetch("/api/admin/audit-log", { headers: authHeaders() }),
+        fetch("/api/admin/validity-report", { headers: authHeaders() }),
+      ]);
+
       if (promptRes.ok) {
         const pData = await promptRes.json();
         setActivePrompt(pData.systemPrompt || "");
       }
 
-      // 2. Fetch attempts
-      const attemptsRes = await fetch("/api/admin/attempts");
       if (attemptsRes.ok) {
         const aData = await attemptsRes.json();
         setAttempts(aData || []);
         setFilteredAttempts(aData || []);
+      } else {
+        // Surface it rather than showing a convincing but empty dashboard.
+        setLoadError(
+          attemptsRes.status === 401
+            ? "Session rejected by the server. Please sign in again."
+            : `Could not load attempts (HTTP ${attemptsRes.status}).`
+        );
       }
-    } catch (_) {
-      console.error("Failed to load admin telemetry dashboard.");
+
+      if (auditRes.ok) setAuditLog((await auditRes.json()) || []);
+      if (validityRes.ok) setValidityReport(await validityRes.json());
+    } catch (e) {
+      console.error("Failed to load admin dashboard.", e);
+      setLoadError("Could not reach the server. Check your connection and retry.");
     } finally {
       setLoadingAttempts(false);
     }
@@ -78,20 +108,32 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
     setFilteredAttempts(filtered);
   }, [searchTerm, attempts]);
 
-  // Login execution
-  const handleLogin = (e: React.FormEvent) => {
+  // Login execution. Credentials are verified by the server against
+  // ADMIN_KEYS (constant-time) -- they are no longer compared against values
+  // baked into this bundle, which shipped the real password to every visitor.
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
-    
-    // Accept standard or accidental typo 'gmaail' provided in prompt
-    const isValidEmail = cleanEmail === "arttest1990@gmail.com" || cleanEmail === "arttest1990@gmaail.com";
-    const isValidPassword = password === "Art@12345";
+    setIsLoggingIn(true);
+    setErrorLogin("");
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    if (isValidEmail && isValidPassword) {
-      setIsAuthenticated(true);
-      setErrorLogin("");
-    } else {
-      setErrorLogin("Invalid administrative credentials. Access Denied.");
+      if (res.ok) {
+        setAdminKey(password);
+        setIsAuthenticated(true);
+        setPassword("");
+      } else {
+        setErrorLogin(data?.error || "Invalid credentials.");
+      }
+    } catch (_) {
+      setErrorLogin("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -103,7 +145,7 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
     try {
       const res = await fetch("/api/system-prompt", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ systemPrompt: activePrompt }),
       });
       if (res.ok) {
@@ -115,6 +157,21 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
     } finally {
       setIsSavingPrompt(false);
     }
+  };
+
+  // Generic JSON export. The CSV below flattens nested fields (geolocation,
+  // judge metadata, headroomShadow, the gap manifest results), so the raw
+  // JSON is what you want for any real analysis.
+  const downloadJSON = (data: any, name: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ART_${name}_${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // CSV compiler & downloader
@@ -152,7 +209,7 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
       "System Touch",
       "Task Description",
       "AI Baseline Document",
-      "Human Refinement Revision",
+      "Human Edited Prompt",
       "Feedback Comment",
       "Judge Model Version",
       "Judge Prompt Hash",
@@ -204,7 +261,7 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
       const touch = att.systemDetails?.touchSupported !== undefined ? String(att.systemDetails.touchSupported) : "";
       const task = att.task || "";
       const baseline = att.baseline || "";
-      const revision = att.revision || "";
+      const revision = att.editedPrompt || "";
       const feedback = att.feedback || "";
       
       const evalMetadata = att.evaluation?.judgeMetadata;
@@ -378,9 +435,10 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
               
               <button
                 type="submit"
-                className="bg-neutral-900 border border-neutral-900 text-white rounded-lg px-4 py-2 text-xs font-bold tracking-wider uppercase flex items-center gap-1.5 hover:bg-neutral-950 transition-colors cursor-pointer"
+                disabled={isLoggingIn || !email.trim() || !password}
+                className="bg-neutral-900 border border-neutral-900 text-white rounded-lg px-4 py-2 text-xs font-bold tracking-wider uppercase flex items-center gap-1.5 hover:bg-neutral-950 transition-colors cursor-pointer disabled:opacity-50"
               >
-                Sign In
+                {isLoggingIn ? "Signing in..." : "Sign In"}
               </button>
             </div>
           </form>
@@ -389,7 +447,21 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
         
         // 2. Authenticated Board State
         <div className="space-y-6">
-          
+
+          {/* Never render a convincing-looking empty dashboard when the data
+              actually failed to load -- say so. */}
+          {loadError && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-3 text-xs font-semibold flex items-center justify-between gap-3">
+              <span>{loadError}</span>
+              <button
+                onClick={loadAdminData}
+                className="bg-white border border-rose-300 text-rose-700 rounded px-3 py-1 text-[11px] font-bold uppercase tracking-wider hover:bg-rose-50 cursor-pointer flex-shrink-0"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {/* Header Action Row */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-neutral-200 pb-4">
             <div>
@@ -491,6 +563,33 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
                     className="w-full text-xs pl-8 pr-3 py-1.5 border border-neutral-200 rounded-lg focus:outline-none focus:border-neutral-400 font-medium bg-white"
                   />
                 </div>
+
+                <button
+                  onClick={() => downloadJSON(attempts, "attempts")}
+                  disabled={attempts.length === 0}
+                  className="bg-white text-neutral-700 cursor-pointer hover:bg-neutral-50 font-bold text-xs uppercase tracking-wider px-3.5 py-1.8 rounded-lg border border-neutral-300 flex items-center gap-1.5 text-nowrap disabled:opacity-50"
+                  title="Full attempt records, including every field the CSV flattens away"
+                >
+                  <Download className="w-4 h-4" /> JSON
+                </button>
+
+                <button
+                  onClick={() => downloadJSON(auditLog, "admin-audit-log")}
+                  disabled={auditLog.length === 0}
+                  className="bg-white text-neutral-700 cursor-pointer hover:bg-neutral-50 font-bold text-xs uppercase tracking-wider px-3.5 py-1.8 rounded-lg border border-neutral-300 flex items-center gap-1.5 text-nowrap disabled:opacity-50"
+                  title="Admin action audit log"
+                >
+                  <Download className="w-4 h-4" /> Audit ({auditLog.length})
+                </button>
+
+                <button
+                  onClick={() => validityReport && downloadJSON(validityReport, "validity-report")}
+                  disabled={!validityReport}
+                  className="bg-white text-neutral-700 cursor-pointer hover:bg-neutral-50 font-bold text-xs uppercase tracking-wider px-3.5 py-1.8 rounded-lg border border-neutral-300 flex items-center gap-1.5 text-nowrap disabled:opacity-50"
+                  title="Variance decomposition, score-shift report and validity monitors"
+                >
+                  <Download className="w-4 h-4" /> Validity
+                </button>
 
                 <button
                   onClick={handleDownloadCSV}
@@ -619,13 +718,13 @@ export default function AdminScreen({ onBack }: AdminScreenProps) {
                                     </div>
                                   </div>
 
-                                  {/* User Revision */}
+                                  {/* User Edited Prompt */}
                                   <div className="space-y-1.5 p-3 bg-white border border-neutral-150 rounded-lg">
                                     <h4 className="font-mono text-[9px] uppercase tracking-wider text-neutral-400 font-bold flex items-center gap-1">
-                                      <Cpu className="w-3.5 h-3.5 text-neutral-500" /> CANDIDATE HUMAN REFINEMENT
+                                      <Cpu className="w-3.5 h-3.5 text-neutral-500" /> CANDIDATE HUMAN EDITED PROMPT
                                     </h4>
                                     <div className="mt-2 text-neutral-750 font-sans leading-relaxed text-[11px] whitespace-pre-wrap max-h-56 overflow-y-auto pr-1">
-                                      {att.revision}
+                                      {att.editedPrompt}
                                     </div>
                                     <div className="pt-2 border-t border-neutral-100 mt-2 flex items-center justify-between text-[10px] text-neutral-500 font-mono">
                                       <span>Time taken: {att.timeTaken}s (of {att.timeAllocated}s)</span>

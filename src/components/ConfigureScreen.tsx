@@ -17,38 +17,58 @@ interface ConfigureProps {
     researchConsent: boolean;
   }) => void;
   isLoading: boolean;
+  // Pre-fills identity/demographics on a repeat attempt by the same person
+  // (e.g. "Benchmark New Scenario" from Results) so retaking the test doesn't
+  // force re-entering everything from scratch. This also makes repeat
+  // attempts by the same person low-friction, which is what the person x
+  // item variance decomposition (scripts/variance-decomposition.ts) needs
+  // real data for -- see docs/HEADROOM_MIGRATION_SPEC.md §11 and §15.
+  initialUserName?: string;
+  initialUserEmail?: string;
+  initialAge?: string;
+  initialGender?: string;
+  initialEducation?: string;
+  initialWorkExperience?: string;
+  initialResearchConsent?: boolean;
 }
 
-export default function ConfigureScreen({ onBack, onGenerate, isLoading }: ConfigureProps) {
+export default function ConfigureScreen({
+  onBack,
+  onGenerate,
+  isLoading,
+  initialUserName = "",
+  initialUserEmail = "",
+  initialAge = "",
+  initialGender = "",
+  initialEducation = "",
+  initialWorkExperience = "",
+  initialResearchConsent = false,
+}: ConfigureProps) {
   // Defaults set to Beginner and General
-  const [userName, setUserName] = useState("");
-  const [userEmail, setUserEmail] = useState("");
+  const [userName, setUserName] = useState(initialUserName);
+  const [userEmail, setUserEmail] = useState(initialUserEmail);
   const [domain, setDomain] = useState("General Knowledge Work");
   const [difficulty, setDifficulty] = useState("Beginner");
-  
+
   // Demographic states relocated from ResultsScreen
-  const [age, setAge] = useState("");
-  const [gender, setGender] = useState("");
-  const [education, setEducation] = useState("");
-  const [workExperience, setWorkExperience] = useState("");
-  const [researchConsent, setResearchConsent] = useState(false);
-  
+  const [age, setAge] = useState(initialAge);
+  const [gender, setGender] = useState(initialGender);
+  const [education, setEducation] = useState(initialEducation);
+  const [workExperience, setWorkExperience] = useState(initialWorkExperience);
+  const [researchConsent, setResearchConsent] = useState(initialResearchConsent);
+
   const [error, setError] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!userName.trim() || !userEmail.trim()) {
-      setError("Please fill out your identity parameters to begin.");
+      setError("Please enter your name and email to begin.");
       return;
     }
-    if (!age || !gender || !education || !workExperience) {
-      setError("Please complete all professional background details.");
-      return;
-    }
-    if (!researchConsent) {
-      setError("Prior to starting, you must review and consent to using anonymized data for research.");
-      return;
-    }
+    // Demographics are optional. They exist for the research dataset, and
+    // consent to that is itself optional -- so requiring someone to state
+    // their age and gender before they can take the test would be
+    // incoherent. Left blank, they are simply not recorded.
     setError("");
     onGenerate({
       userName,
@@ -71,10 +91,10 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
         className="mb-1 text-center"
       >
         <span className="text-[10px] uppercase font-mono font-bold py-0.5 px-2.5 rounded bg-neutral-900 text-amber-500 tracking-wider">
-          Step 2: Candidate Intake & Session Setup
+          Step 2 of 2
         </span>
         <h2 className="text-lg md:text-xl font-extrabold text-neutral-800 mt-1 font-sans tracking-tight">
-          Configure Your Evaluation
+          Set up your test
         </h2>
       </motion.div>
 
@@ -89,7 +109,7 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
           {/* Section 1: Identity Parameters */}
           <div className="space-y-1.5">
             <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-450 hidden md:block">
-              Identity Profile
+              About you
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div>
@@ -126,8 +146,11 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
 
           <div className="border-b border-neutral-100 my-0.5"></div>
 
-          {/* Section 2: Demographic Details */}
+          {/* Section 2: Demographic Details -- all optional */}
           <div className="space-y-1.5">
+            <p className="text-[10px] text-neutral-400 font-medium">
+              Optional — used only for anonymised research, and only if you consent below.
+            </p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div>
                 <label className="block text-[11px] font-bold text-neutral-750 mb-0.5 flex items-center gap-1">
@@ -138,7 +161,6 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
                   type="number"
                   min="1"
                   max="120"
-                  required
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
                   placeholder="Years"
@@ -152,7 +174,6 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
                   Gender
                 </label>
                 <select
-                  required
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
                   className="w-full rounded border border-neutral-200 px-2 py-1.5 text-xs text-neutral-800 bg-white hover:bg-neutral-50 focus:outline-none focus:border-amber-500 font-semibold transition-all cursor-pointer"
@@ -172,7 +193,6 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
                   Education
                 </label>
                 <select
-                  required
                   value={education}
                   onChange={(e) => setEducation(e.target.value)}
                   className="w-full rounded border border-neutral-200 px-2 py-1.5 text-xs text-neutral-800 bg-white hover:bg-neutral-50 focus:outline-none focus:border-amber-500 font-semibold transition-all cursor-pointer"
@@ -196,7 +216,6 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
                   type="number"
                   min="0"
                   max="80"
-                  required
                   value={workExperience}
                   onChange={(e) => setWorkExperience(e.target.value)}
                   placeholder="Years"
@@ -213,7 +232,7 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div>
                 <label className="block text-[11px] font-bold text-neutral-800 mb-0.5">
-                  Target Domain Expert Area
+                  Your field
                 </label>
                 <select
                   value={domain}
@@ -230,7 +249,7 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
 
               <div>
                 <label className="block text-[11px] font-bold text-neutral-800 mb-0.5">
-                  Challenge Tier
+                  Difficulty
                 </label>
                 <div className="grid grid-cols-3 gap-1">
                   {DIFFICULTY_LEVELS.map((level) => (
@@ -254,7 +273,7 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
 
           <div className="border-b border-neutral-100 my-0.5"></div>
 
-          {/* Section 4: Research Consent Checkbox */}
+          {/* Section 4: Research Consent Checkbox (optional -- you can proceed without checking this) */}
           <div className="pt-0">
             <label className="flex items-start gap-2 cursor-pointer selection:bg-transparent">
               <input
@@ -262,10 +281,9 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
                 checked={researchConsent}
                 onChange={(e) => setResearchConsent(e.target.checked)}
                 className="mt-0.5 rounded border-neutral-300 text-amber-500 focus:ring-amber-500 h-3.5 w-3.5 cursor-pointer"
-                required
               />
               <span className="text-[10px] text-neutral-500 leading-tight font-medium">
-                I hereby consent to using my anonymized evaluation details for research and aggregated cognitive benchmarking statistics.
+                (Optional) I consent to using my anonymized evaluation details for research and aggregated cognitive benchmarking statistics.
               </span>
             </label>
           </div>
@@ -293,12 +311,12 @@ export default function ConfigureScreen({ onBack, onGenerate, isLoading }: Confi
               {isLoading ? (
                 <div className="flex items-center gap-1.5">
                   <div className="w-4 h-4 border-2 border-neutral-800 border-t-transparent rounded-full animate-spin"></div>
-                  Generating Challenge...
+                  Preparing your first task...
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-neutral-950" />
-                  Generate Challenge Scenario
+                  Start the test
                   <ArrowRight className="w-4 h-4 text-neutral-950" />
                 </div>
               )}

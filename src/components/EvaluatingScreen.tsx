@@ -2,17 +2,26 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { Radio, ShieldAlert, Cpu } from "lucide-react";
 
-export default function EvaluatingScreen() {
+interface EvaluatingProps {
+  itemIndex?: number;
+  itemsTotal?: number;
+}
+
+export default function EvaluatingScreen({ itemIndex = 0, itemsTotal = 1 }: EvaluatingProps) {
   const [promptIdx, setPromptIdx] = useState(0);
 
+  // These name the steps that actually run server-side. The previous list
+  // ("Measuring semantic distance...", "Calibrating value density index
+  // metrics...") described stages that do not exist anywhere in the pipeline.
   const analysisPrompts = [
-    "Analyzing submitted revision...",
-    "Measuring semantic distance from base guidelines...",
-    "Assessing terminology specificity and structure...",
-    "Calibrating value density index metrics...",
-    "Calculating final Human Added-Value Score (ART)...",
-    "Logging test completion attributes safely..."
+    "Running your edited prompt through the AI...",
+    "Asking the AI to improve its own first answer...",
+    "Comparing the two answers blind, without knowing which is yours...",
+    "Checking which specific gaps your version closed...",
+    "Working out your score..."
   ];
+
+  const isLastItem = itemIndex + 1 >= itemsTotal;
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -40,14 +49,15 @@ export default function EvaluatingScreen() {
         className="space-y-3"
       >
         <p className="text-sm font-mono tracking-widest text-amber-600 uppercase font-semibold">
-          ACTIVE BENCHMARK RUNNING
+          {itemsTotal > 1 ? `Scoring task ${itemIndex + 1} of ${itemsTotal}` : "Scoring your answer"}
         </p>
         <h3 className="text-lg font-bold text-neutral-800 flex items-center justify-center gap-2">
           <Radio className="w-4.5 h-4.5 text-amber-500 animate-pulse" />
           {analysisPrompts[promptIdx]}
         </h3>
         <p className="text-xs text-neutral-400 max-w-xs mx-auto">
-          Please do not refresh nor navigate away from the testing iframe during secure evaluation processing.
+          This takes up to a minute. Please don't refresh or leave this page.
+          {!isLastItem && " We'll go straight to the next task when it's done."}
         </p>
       </motion.div>
 

@@ -4,6 +4,7 @@ export enum TestStep {
   TOUR = "TOUR",
   ACTIVE_TEST = "ACTIVE_TEST",
   EVALUATING = "EVALUATING",
+  EVALUATION_ERROR = "EVALUATION_ERROR",
   RESULTS = "RESULTS",
   ADMIN = "ADMIN",
   VERIFICATION = "VERIFICATION"
@@ -49,6 +50,14 @@ export interface EvaluationResult {
   textTelemetry?: TextTelemetry;
 }
 
+// One completed item's summary within a multi-item run (docs/HEADROOM_MIGRATION_SPEC.md §11).
+export interface RunItemSummary {
+  sessionId: string;
+  domain: string;
+  difficulty: string;
+  score: number;
+}
+
 export interface UserSignals {
   timeTaken: number;
   editCount: number;
@@ -65,7 +74,8 @@ export interface AttemptLog {
   difficulty: string;
   task: string;
   baseline: string;
-  revision: string;
+  baselinePrompt?: string;
+  editedPrompt: string;
   score: number;
   evaluation: EvaluationResult;
   timestamp: string;
@@ -81,6 +91,11 @@ export interface AttemptLog {
   userSignals?: UserSignals;
 }
 
+// Scoped to symbolic/analytic knowledge work per the Headroom paper's validity
+// boundary (docs/HEADROOM_MIGRATION_SPEC.md §12, §16.4) -- domains whose core
+// work is relational, persuasive, or accountability-bearing (Marketing, Sales,
+// Human Resources, Business Operations, Content & Communications, Customer
+// Support) were pruned from the original 13.
 export const DOMAINS = [
   "General Knowledge Work",
   "Software Engineering",
@@ -88,13 +103,7 @@ export const DOMAINS = [
   "Data Analysis",
   "Finance",
   "Legal",
-  "Consulting & Strategy",
-  "Marketing",
-  "Sales",
-  "Human Resources",
-  "Business Operations",
-  "Content & Communications",
-  "Customer Support"
+  "Consulting & Strategy"
 ];
 
 export const DIFFICULTY_LEVELS = [
