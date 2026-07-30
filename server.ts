@@ -48,7 +48,11 @@ import type { DailyCapState } from "./server/security";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+// Cloud Run (and most managed hosts, including AI Studio deploys) inject the
+// port to listen on via $PORT and fail the container's startup health check if
+// it listens anywhere else. Hardcoding 3000 makes the container unbootable
+// there; 3000 remains the local default.
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
